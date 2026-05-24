@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+
+.env*
+!.env.example
+secrets/
+
+topic info/
+docs/
+
+ecommerce_agent_dataset/
