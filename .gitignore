@@ -1,11 +1,79 @@
-.venv/
-__pycache__/
+# ─────────────────────────────────────────────────────────────
+# ShopMind .gitignore
+# ─────────────────────────────────────────────────────────────
 
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Build / dist
+build/
+dist/
+
+# Secrets / env
 .env*
 !.env.example
 secrets/
+*.pem
+*.key
 
-topic info/
-docs/
+# Runtime data (SQLite + Qdrant + logs)
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+logs/
 
+# Datasets — 全量 dataset 不入 git,只保留样品间
+dataset/ecommerce_agent_dataset/
+dataset/ecommerce_agent_dataset*/
+dataset/sample_dataset/
 ecommerce_agent_dataset/
+
+# 私有文档 / 草稿(用户既有意图,保留)
+docs/
+topic info/
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Android (client/)
+client/**/build/
+client/**/.gradle/
+client/**/.cxx/
+client/**/captures/
+client/**/local.properties
+*.apk
+*.aab
+*.dex
+*.iml
+
+# Misc
+*.bak
+*.tmp
+*.orig

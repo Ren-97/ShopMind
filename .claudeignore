@@ -1,0 +1,106 @@
+# ShopMind — Claude Code context exclusions
+# Syntax: same as .gitignore (! = re-include exception)
+
+# =============================================================================
+# Dependencies & package managers
+# =============================================================================
+.venv/
+venv/
+env/
+node_modules/
+vendor/
+
+# =============================================================================
+# Build outputs & tool caches
+# =============================================================================
+.gradle/
+**/build/
+build/
+dist/
+.next/
+out/
+target/
+coverage/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.nox/
+htmlcov/
+
+# Android (client/)
+client/**/build/
+client/**/.gradle/
+client/**/.cxx/
+client/**/captures/
+*.apk
+*.aab
+*.dex
+
+# =============================================================================
+# Editor & IDE
+# =============================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# =============================================================================
+# Python bytecode & caches
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# =============================================================================
+# Secrets, env, logs
+# =============================================================================
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+*.log
+
+# =============================================================================
+# Local DB, vector store, runtime data
+# =============================================================================
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+qdrant_storage/
+
+# =============================================================================
+# Binary & large media (outside allowed sample room)
+# =============================================================================
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.parquet
+*.csv
+*.bin
+*.wasm
+
+# =============================================================================
+# Dataset isolation (core)
+# Strategy: block all of dataset/, then un-ignore dataset/sample/ only.
+# =============================================================================
+dataset/*
+!dataset/sample/
+!dataset/sample/**
+
+# Hard lock: full ecommerce photo dataset (~11MB+, must never be scanned)
+dataset/ecommerce_agent_dataset/
+dataset/ecommerce_agent_dataset/**
+
+# Duplicate / legacy dataset trees (local copies, if present)
+dataset/ecommerce_agent_dataset*/
+dataset/sample_dataset/
+dataset/sample_dataset/**

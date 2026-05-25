@@ -1,0 +1,311 @@
+"""
+SQLAlchemy v2 ORM 模型 — 12 张表(对应 docs/design.md §4.4)。
+
+D1 商品族(6):products / skus / product_attributes / product_faqs /
+                product_reviews / product_caveats
+D2 用户态(5):users / user_profile / cart_items / orders / chat_history
+D3 索引衍生(1):ingest_manifest
+
+约定:
+- 所有"用户态"表(D2)主键 / 外键含 user_id;Repo 层 SQL 永远 WHERE user_id=?
+- products.is_active / in_stock 是防幻觉铁律 1 的硬过滤字段
+- chat_history.session_id 由前端生成,不另建 sessions 表
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from server.storage.db import Base
+
+
+# ═════════════════════════════════════════════════════════════
+# D1 商品族(只读,从 JSON ingest)
+# ═════════════════════════════════════════════════════════════
+class Product(Base):
+    __tablename__ = "products"
+
+    product_id: Mapped[str] = mapped_column(String, primary_key=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    brand: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    sub_category: Mapped[str] = mapped_column(String, nullable=False)
+    base_price: Mapped[float] = mapped_column(Float, nullable=False)
+    image_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    age_group: Mapped[str | None] = mapped_column(String, nullable=True)
+    contains_alcohol: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    contains_fragrance: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    in_stock: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    marketing_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp(), nullable=False
+    )
+
+    skus: Mapped[list[SKU]] = relationship(
+        back_populates="product", cascade="all, delete-orphan"
+    )
+    attributes: Mapped[list[ProductAttribute]] = relationship(
+        back_populates="product", cascade="all, delete-orphan"
+    )
+    faqs: Mapped[list[ProductFAQ]] = relationship(
+        back_populates="product", cascade="all, delete-orphan"
+    )
+    reviews: Mapped[list[ProductReview]] = relationship(
+        back_populates="product", cascade="all, delete-orphan"
+    )
+    caveats: Mapped[ProductCaveats | None] = relationship(
+        back_populates="product", cascade="all, delete-orphan", uselist=False
+    )
+
+    __table_args__ = (
+        Index("idx_products_brand", "brand"),
+        Index("idx_products_category", "category", "sub_category"),
+        Index("idx_products_price", "base_price"),
+        Index(
+            "idx_product_filter",
+            "category", "sub_category", "base_price", "in_stock", "is_active",
+        ),
+    )
+
+
+class SKU(Base):
+    __tablename__ = "skus"
+
+    sku_id: Mapped[str] = mapped_column(String, primary_key=True)
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey("products.product_id", ondelete="CASCADE"), nullable=False
+    )
+    properties: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+
+    product: Mapped[Product] = relationship(back_populates="skus")
+
+    __table_args__ = (
+        Index("idx_skus_product", "product_id"),
+        Index("idx_skus_price", "price"),
+    )
+
+
+class ProductAttribute(Base):
+    """商品标签(多值拆行):suitable_skin / not_suitable_skin / effects / scene 等。"""
+
+    __tablename__ = "product_attributes"
+
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey("products.product_id", ondelete="CASCADE"), primary_key=True
+    )
+    attr_key: Mapped[str] = mapped_column(String, primary_key=True)
+    attr_value: Mapped[str] = mapped_column(String, primary_key=True)
+
+    product: Mapped[Product] = relationship(back_populates="attributes")
+
+    __table_args__ = (
+        Index("idx_attributes_lookup", "attr_key", "attr_value"),
+    )
+
+
+class ProductFAQ(Base):
+    __tablename__ = "product_faqs"
+
+    faq_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey("products.product_id", ondelete="CASCADE"), nullable=False
+    )
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    order_idx: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    product: Mapped[Product] = relationship(back_populates="faqs")
+
+    __table_args__ = (
+        Index("idx_faqs_product", "product_id"),
+    )
+
+
+class ProductReview(Base):
+    __tablename__ = "product_reviews"
+
+    review_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey("products.product_id", ondelete="CASCADE"), nullable=False
+    )
+    nickname: Mapped[str] = mapped_column(String, nullable=False)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+    product: Mapped[Product] = relationship(back_populates="reviews")
+
+    __table_args__ = (
+        CheckConstraint("rating BETWEEN 1 AND 5", name="ck_reviews_rating_range"),
+        Index("idx_reviews_product", "product_id"),
+    )
+
+
+class ProductCaveats(Base):
+    """LLM 离线抽出的 caveats(每商品 1 条,可空表示无负面信号)。"""
+
+    __tablename__ = "product_caveats"
+
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey("products.product_id", ondelete="CASCADE"), primary_key=True
+    )
+    caveats_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extracted_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp(), nullable=False
+    )
+
+    product: Mapped[Product] = relationship(back_populates="caveats")
+
+
+# ═════════════════════════════════════════════════════════════
+# D2 用户态(全部带 user_id)
+# ═════════════════════════════════════════════════════════════
+class User(Base):
+    __tablename__ = "users"
+
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    display_name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp(), nullable=False
+    )
+
+    profile: Mapped[UserProfile | None] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class UserProfile(Base):
+    __tablename__ = "user_profile"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True
+    )
+    # 基础人口学
+    age: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gender: Mapped[str | None] = mapped_column(String, nullable=True)  # male/female/other
+    height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 消费倾向(soft 排序信号)
+    consumption_tier: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 收货
+    recipient_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String, nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 类目特化偏好(JSON 扩展)
+    preferences: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp(), nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="profile")
+
+
+class CartItem(Base):
+    __tablename__ = "cart_items"
+
+    cart_item_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False
+    )
+    sku_id: Mapped[str] = mapped_column(
+        ForeignKey("skus.sku_id"), nullable=False
+    )
+    qty: Mapped[int] = mapped_column(Integer, nullable=False)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("qty > 0", name="ck_cart_qty_positive"),
+        UniqueConstraint("user_id", "sku_id", name="uq_cart_user_sku"),
+        Index("idx_cart_user", "user_id"),
+    )
+
+
+class Order(Base):
+    __tablename__ = "orders"
+
+    order_id: Mapped[str] = mapped_column(String, primary_key=True)  # UUID
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False)  # pending/confirmed/cancelled
+    items: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    address: Mapped[str] = mapped_column(Text, nullable=False)
+    total_price: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_orders_user", "user_id", "created_at"),
+    )
+
+
+class ChatHistory(Base):
+    __tablename__ = "chat_history"
+
+    msg_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False
+    )
+    session_id: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)  # user/assistant/tool
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tool_calls: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_chat_user_session", "user_id", "session_id", "created_at"),
+    )
+
+
+# ═════════════════════════════════════════════════════════════
+# D3 索引衍生
+# ═════════════════════════════════════════════════════════════
+class IngestManifest(Base):
+    """增量 ingest 账本(per-product hash + Qdrant chunk 数)。"""
+
+    __tablename__ = "ingest_manifest"
+
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey("products.product_id", ondelete="CASCADE"), primary_key=True
+    )
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)  # sha256(json)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_ingested_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp(), nullable=False
+    )
+
+
+__all__ = [
+    # D1
+    "Product", "SKU", "ProductAttribute", "ProductFAQ", "ProductReview", "ProductCaveats",
+    # D2
+    "User", "UserProfile", "CartItem", "Order", "ChatHistory",
+    # D3
+    "IngestManifest",
+]

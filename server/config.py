@@ -1,0 +1,166 @@
+"""
+ShopMind 集中配置(对应 docs/design.md §4.9)。
+
+所有"魔法数字"、路径、模型名都集中在这里;业务代码 import 后只读使用,
+绝不在业务代码里硬编码常量。
+
+加载顺序:
+  1. 进程启动时 python-dotenv 加载根目录 `.env`(若存在)
+  2. 模块级常量从 os.getenv 读敏感字段(默认 None,缺失时业务层报错)
+  3. 路径默认指向 `dataset/sample/`(样品间),通过 .env 覆盖切到全量
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# ─────────────────────────────────────────────────────────────
+# .env 加载(在所有 getenv 之前)
+# ─────────────────────────────────────────────────────────────
+PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
+
+
+def _env(key: str, default: str) -> str:
+    """读环境变量,带默认值。"""
+    value = os.getenv(key)
+    return value if value is not None and value != "" else default
+
+
+def _env_int(key: str, default: int) -> int:
+    raw = os.getenv(key)
+    if raw is None or raw == "":
+        return default
+    return int(raw)
+
+
+def _env_float(key: str, default: float) -> float:
+    raw = os.getenv(key)
+    if raw is None or raw == "":
+        return default
+    return float(raw)
+
+
+# ─────────────────────────────────────────────────────────────
+# 模型选型(§4.2.1)
+# ─────────────────────────────────────────────────────────────
+LLM_AGENT_MODEL: str = _env("LLM_AGENT_MODEL", "claude-sonnet-4-6")  # 主对话 + 离线 caveats
+LLM_FAST_MODEL: str = _env("LLM_FAST_MODEL", "claude-haiku-4-5")  # Planner + Reranker
+EMBEDDING_MODEL: str = _env("EMBEDDING_MODEL", "text-embedding-3-large")  # OpenAI
+EMBEDDING_DIMENSION: int = _env_int("EMBEDDING_DIMENSION", 3072)
+SPARSE_MODEL_NAME: str = _env("SPARSE_MODEL_NAME", "Qdrant/bm25")  # fastembed BM25
+
+# ─────────────────────────────────────────────────────────────
+# 检索(§4.1)
+# ─────────────────────────────────────────────────────────────
+RETRIEVAL_DENSE_LIMIT: int = _env_int("RETRIEVAL_DENSE_LIMIT", 20)
+RETRIEVAL_SPARSE_LIMIT: int = _env_int("RETRIEVAL_SPARSE_LIMIT", 20)
+RETRIEVAL_RRF_LIMIT: int = _env_int("RETRIEVAL_RRF_LIMIT", 30)
+RETRIEVAL_PRODUCT_TOP_N: int = _env_int("RETRIEVAL_PRODUCT_TOP_N", 10)
+
+# ─────────────────────────────────────────────────────────────
+# Planner(§4.2)
+# ─────────────────────────────────────────────────────────────
+PLANNER_RECENT_TURNS: int = _env_int("PLANNER_RECENT_TURNS", 5)
+
+# ─────────────────────────────────────────────────────────────
+# Rerank + 阈值(§4.3)
+# ─────────────────────────────────────────────────────────────
+COARSE_THRESHOLD: float = _env_float("COARSE_THRESHOLD", 0.005)  # 粗排 RRF 阈值
+RERANK_THRESHOLD: float = _env_float("RERANK_THRESHOLD", 0.5)  # LLM 自评分阈值
+RERANK_TOP_N: int = _env_int("RERANK_TOP_N", 5)
+
+# ─────────────────────────────────────────────────────────────
+# Indexing(§4.5)
+# ─────────────────────────────────────────────────────────────
+CAVEATS_REVIEW_CHANGE_RATIO: float = _env_float("CAVEATS_REVIEW_CHANGE_RATIO", 0.20)
+CAVEATS_MAX_AGE_DAYS: int = _env_int("CAVEATS_MAX_AGE_DAYS", 30)
+
+# ─────────────────────────────────────────────────────────────
+# Agent(§4.6)
+# ─────────────────────────────────────────────────────────────
+MAX_AGENT_TURNS: int = _env_int("MAX_AGENT_TURNS", 5)
+THINKING_BUDGET_TOKENS: int = _env_int("THINKING_BUDGET_TOKENS", 2048)
+
+# ─────────────────────────────────────────────────────────────
+# Cache(§4.8)
+# ─────────────────────────────────────────────────────────────
+EMBEDDING_CACHE_SIZE: int = _env_int("EMBEDDING_CACHE_SIZE", 1000)
+RETRIEVAL_CACHE_SIZE: int = _env_int("RETRIEVAL_CACHE_SIZE", 1000)
+RETRIEVAL_CACHE_TTL_SECONDS: int = _env_int("RETRIEVAL_CACHE_TTL_SECONDS", 300)
+CACHE_BACKEND: str = _env("CACHE_BACKEND", "memory")  # "memory" | "redis"(V2)
+REDIS_URL: str = _env("REDIS_URL", "")  # V2 才填
+
+# ─────────────────────────────────────────────────────────────
+# 基础设施 / 数据路径
+# 设计偏离:默认指向 dataset/sample/(只读样品间),切全量改 .env
+# ─────────────────────────────────────────────────────────────
+SQLITE_PATH: str = _env("SQLITE_PATH", "./data/shopmind.db")
+QDRANT_PATH: str = _env("QDRANT_PATH", "./data/qdrant_storage/")
+INGEST_DATASET_DIR: str = _env("INGEST_DATASET_DIR", "./dataset/sample/")
+STATIC_FILES_DIR: str = _env("STATIC_FILES_DIR", "./dataset/sample/")
+
+BASE_URL: str = _env("BASE_URL", "http://localhost:8000")
+
+# Qdrant collection 名(嵌入式模式同一目录可多个 collection)
+QDRANT_COLLECTION_NAME: str = _env("QDRANT_COLLECTION_NAME", "shopmind_products")
+
+# ─────────────────────────────────────────────────────────────
+# 多用户(§4.6.8)
+# ─────────────────────────────────────────────────────────────
+DEFAULT_USER_ID: str = _env("DEFAULT_USER_ID", "demo_user_1")
+USER_ID_HEADER: str = "X-User-Id"
+
+# ─────────────────────────────────────────────────────────────
+# .env 加载敏感字段(§4.9 末尾)
+# ─────────────────────────────────────────────────────────────
+ANTHROPIC_API_KEY: str | None = os.getenv("ANTHROPIC_API_KEY")
+OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL: str | None = os.getenv("OPENAI_BASE_URL") or None
+
+# ─────────────────────────────────────────────────────────────
+# 派生:绝对路径(避免业务层重复 resolve)
+# ─────────────────────────────────────────────────────────────
+def _abs(p: str) -> Path:
+    """相对路径 → 项目根锚定的绝对路径。"""
+    path = Path(p)
+    return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
+
+
+SQLITE_PATH_ABS: Path = _abs(SQLITE_PATH)
+QDRANT_PATH_ABS: Path = _abs(QDRANT_PATH)
+INGEST_DATASET_DIR_ABS: Path = _abs(INGEST_DATASET_DIR)
+STATIC_FILES_DIR_ABS: Path = _abs(STATIC_FILES_DIR)
+
+
+__all__ = [
+    # 模型
+    "LLM_AGENT_MODEL", "LLM_FAST_MODEL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSION",
+    "SPARSE_MODEL_NAME",
+    # 检索
+    "RETRIEVAL_DENSE_LIMIT", "RETRIEVAL_SPARSE_LIMIT", "RETRIEVAL_RRF_LIMIT",
+    "RETRIEVAL_PRODUCT_TOP_N",
+    # Planner
+    "PLANNER_RECENT_TURNS",
+    # Rerank
+    "COARSE_THRESHOLD", "RERANK_THRESHOLD", "RERANK_TOP_N",
+    # Indexing
+    "CAVEATS_REVIEW_CHANGE_RATIO", "CAVEATS_MAX_AGE_DAYS",
+    # Agent
+    "MAX_AGENT_TURNS", "THINKING_BUDGET_TOKENS",
+    # Cache
+    "EMBEDDING_CACHE_SIZE", "RETRIEVAL_CACHE_SIZE", "RETRIEVAL_CACHE_TTL_SECONDS",
+    "CACHE_BACKEND", "REDIS_URL",
+    # 路径
+    "PROJECT_ROOT", "SQLITE_PATH", "QDRANT_PATH", "INGEST_DATASET_DIR",
+    "STATIC_FILES_DIR", "BASE_URL", "QDRANT_COLLECTION_NAME",
+    "SQLITE_PATH_ABS", "QDRANT_PATH_ABS", "INGEST_DATASET_DIR_ABS",
+    "STATIC_FILES_DIR_ABS",
+    # 多用户
+    "DEFAULT_USER_ID", "USER_ID_HEADER",
+    # Secrets
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL",
+]
