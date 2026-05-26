@@ -1,15 +1,17 @@
 """
-SQLAlchemy v2 ORM 模型 — 12 张表(对应 docs/design.md §4.4)。
+SQLAlchemy v2 ORM 模型(对应 docs/design.md §4.4)。
 
-D1 商品族(6):products / skus / product_attributes / product_faqs /
-                product_reviews / product_caveats
-D2 用户态(5):users / user_profile / cart_items / orders / chat_history
-D3 索引衍生(1):ingest_manifest
+D1 商品族:products(含 JSONB properties)/ skus / product_faqs /
+            product_reviews / product_caveats
+D2 用户态:users / user_profile / cart_items / orders / chat_history
+D3 索引衍生:ingest_manifest
 
 约定:
 - 所有"用户态"表(D2)主键 / 外键含 user_id;Repo 层 SQL 永远 WHERE user_id=?
 - products.is_active / in_stock 是防幻觉铁律 1 的硬过滤字段
 - chat_history.session_id 由前端生成,不另建 sessions 表
+- 类目特化属性(suitable_skin / cpu / gender / ...)进 products.properties JSONB,
+  GIN 索引支持 `@>` 操作符 contains 查询
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from server.storage.db import Base
@@ -40,6 +43,13 @@ from server.storage.db import Base
 # D1 商品族(只读,从 JSON ingest)
 # ═════════════════════════════════════════════════════════════
 class Product(Base):
+    """商品主表。
+
+    类目特化属性(suitable_skin / contains_alcohol / gender / cpu_model / ...)
+    全部进 `properties` JSONB 字段,加新类目零 schema 改动。
+    JSONB + GIN 索引支持快速 @> 查询(标量等值 + 数组 contains 都走索引)。
+    """
+
     __tablename__ = "products"
 
     product_id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -49,12 +59,15 @@ class Product(Base):
     sub_category: Mapped[str] = mapped_column(String, nullable=False)
     base_price: Mapped[float] = mapped_column(Float, nullable=False)
     image_path: Mapped[str | None] = mapped_column(String, nullable=True)
-    age_group: Mapped[str | None] = mapped_column(String, nullable=True)
-    contains_alcohol: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    contains_fragrance: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     in_stock: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     marketing_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 类目特化属性总仓库(JSONB,GIN 索引)
+    # 例:{"suitable_skin": ["敏感肌"], "contains_alcohol": false, "age_group": "25+",
+    #      "gender": "通用", "cpu": "i7", ...}
+    properties: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.current_timestamp(), nullable=False
     )
@@ -63,9 +76,6 @@ class Product(Base):
     )
 
     skus: Mapped[list[SKU]] = relationship(
-        back_populates="product", cascade="all, delete-orphan"
-    )
-    attributes: Mapped[list[ProductAttribute]] = relationship(
         back_populates="product", cascade="all, delete-orphan"
     )
     faqs: Mapped[list[ProductFAQ]] = relationship(
@@ -86,6 +96,8 @@ class Product(Base):
             "idx_product_filter",
             "category", "sub_category", "base_price", "in_stock", "is_active",
         ),
+        # GIN 索引让 properties @> '{...}' 查询走索引(标量 + 数组 contains 都生效)
+        Index("idx_products_properties", "properties", postgresql_using="gin"),
     )
 
 
@@ -104,24 +116,6 @@ class SKU(Base):
     __table_args__ = (
         Index("idx_skus_product", "product_id"),
         Index("idx_skus_price", "price"),
-    )
-
-
-class ProductAttribute(Base):
-    """商品标签(多值拆行):suitable_skin / not_suitable_skin / effects / scene 等。"""
-
-    __tablename__ = "product_attributes"
-
-    product_id: Mapped[str] = mapped_column(
-        ForeignKey("products.product_id", ondelete="CASCADE"), primary_key=True
-    )
-    attr_key: Mapped[str] = mapped_column(String, primary_key=True)
-    attr_value: Mapped[str] = mapped_column(String, primary_key=True)
-
-    product: Mapped[Product] = relationship(back_populates="attributes")
-
-    __table_args__ = (
-        Index("idx_attributes_lookup", "attr_key", "attr_value"),
     )
 
 
@@ -144,6 +138,16 @@ class ProductFAQ(Base):
 
 
 class ProductReview(Base):
+    """用户评论 — 原始字段 + LLM 派生信号(sentiment / aspects)同表存放。
+
+    架构定位:
+    - SQL 是单一真相源(含 LLM 派生信号)
+    - Qdrant payload 复刻 sentiment / aspects 仅为查询性能(零 round-trip 过滤)
+    - 删 Qdrant 重建时,LLM 0 重调,从 SQL 直接读
+    sentiment / aspects 为 NULL 表示该 review 尚未走 Haiku 分类
+    (规则过滤未通过 / 错误降级 / 旧数据未迁移)。
+    """
+
     __tablename__ = "product_reviews"
 
     review_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -153,11 +157,18 @@ class ProductReview(Base):
     nickname: Mapped[str] = mapped_column(String, nullable=False)
     rating: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # LLM 派生信号(§4.5.2 Step 2)
+    sentiment: Mapped[float | None] = mapped_column(Float, nullable=True)
+    aspects: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     product: Mapped[Product] = relationship(back_populates="reviews")
 
     __table_args__ = (
         CheckConstraint("rating BETWEEN 1 AND 5", name="ck_reviews_rating_range"),
+        CheckConstraint(
+            "sentiment IS NULL OR (sentiment BETWEEN -1.0 AND 1.0)",
+            name="ck_reviews_sentiment_range",
+        ),
         Index("idx_reviews_product", "product_id"),
     )
 
@@ -287,7 +298,13 @@ class ChatHistory(Base):
 # D3 索引衍生
 # ═════════════════════════════════════════════════════════════
 class IngestManifest(Base):
-    """增量 ingest 账本(per-product hash + Qdrant chunk 数)。"""
+    """增量 ingest 账本(per-product hash + Qdrant chunk 数)。
+
+    两级 hash:
+    - content_hash:整文件 sha256,决定是否进入 _sync_product(粗筛)
+    - main_chunk_hash:main chunk 文本 sha256,在 _sync_product 内决定是否重 embed main
+      (与 review identity-diff / faq 列表对比 一同构成 per-chunk 细粒度短路)
+    """
 
     __tablename__ = "ingest_manifest"
 
@@ -295,6 +312,7 @@ class IngestManifest(Base):
         ForeignKey("products.product_id", ondelete="CASCADE"), primary_key=True
     )
     content_hash: Mapped[str] = mapped_column(String, nullable=False)  # sha256(json)
+    main_chunk_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
     last_ingested_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.current_timestamp(), nullable=False
@@ -303,7 +321,7 @@ class IngestManifest(Base):
 
 __all__ = [
     # D1
-    "Product", "SKU", "ProductAttribute", "ProductFAQ", "ProductReview", "ProductCaveats",
+    "Product", "SKU", "ProductFAQ", "ProductReview", "ProductCaveats",
     # D2
     "User", "UserProfile", "CartItem", "Order", "ChatHistory",
     # D3

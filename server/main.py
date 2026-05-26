@@ -3,7 +3,7 @@ FastAPI 应用入口(对应 docs/design.md §6 + §4.6.8 + §4.7)。
 
 Chunk 1 范围:
 - FastAPI app 骨架 + CORS
-- Lifespan:启动期 create_all (SQLite) + ensure_collection (Qdrant)
+- Lifespan:启动期 create_all (Postgres + JSONB GIN 索引) + ensure_collection (Qdrant)
 - /static 挂载到 STATIC_FILES_DIR(图片 image_url 拼接)
 - /health 健康检查 + /readyz 含 Qdrant 状态
 - 路由模块(api/chat.py 等)Chunk 2+ 加入,这里先留 import 注释
@@ -47,6 +47,13 @@ structlog.configure(
 log = structlog.get_logger("shopmind")
 
 
+def _redact_dsn(dsn: str) -> str:
+    """从 DSN 里抠掉密码,避免日志泄露(scheme://user@host/db)。"""
+    import re
+
+    return re.sub(r"(://[^:/]+):[^@]+@", r"\1:***@", dsn)
+
+
 # ─────────────────────────────────────────────────────────────
 # Lifespan:启动 / 关闭钩子
 # ─────────────────────────────────────────────────────────────
@@ -54,12 +61,12 @@ log = structlog.get_logger("shopmind")
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     log.info(
         "startup_begin",
-        sqlite=str(config.SQLITE_PATH_ABS),
+        database_url=_redact_dsn(config.DATABASE_URL),
         qdrant=str(config.QDRANT_PATH_ABS),
         static=str(config.STATIC_FILES_DIR_ABS),
         dataset=str(config.INGEST_DATASET_DIR_ABS),
     )
-    # 1. SQLite 建表(幂等)
+    # 1. Postgres 建表 + 索引(幂等)
     await create_all()
 
     # 2. Qdrant collection 初始化(幂等)
@@ -130,7 +137,7 @@ class HealthResponse(BaseModel):
 
 class ReadyResponse(BaseModel):
     status: str
-    sqlite: bool
+    postgres: bool
     qdrant: bool
     qdrant_points: int | None = None
 
@@ -142,8 +149,19 @@ async def health() -> HealthResponse:
 
 @app.get("/readyz", response_model=ReadyResponse, tags=["meta"])
 async def readyz() -> ReadyResponse:
-    """完整可服务检查:SQLite 可建表 + Qdrant collection 存在 + count 可读。"""
-    sqlite_ok = config.SQLITE_PATH_ABS.parent.exists()
+    """完整可服务检查:Postgres 可连 + Qdrant collection 存在 + count 可读。"""
+    from sqlalchemy import text
+
+    from server.storage.db import engine
+
+    postgres_ok = False
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        postgres_ok = True
+    except Exception as e:
+        log.warning("readyz_postgres_error", error=str(e))
+
     qdrant_ok = False
     qdrant_points: int | None = None
     try:
@@ -154,8 +172,8 @@ async def readyz() -> ReadyResponse:
         log.warning("readyz_qdrant_error", error=str(e))
 
     return ReadyResponse(
-        status="ok" if (sqlite_ok and qdrant_ok) else "degraded",
-        sqlite=sqlite_ok,
+        status="ok" if (postgres_ok and qdrant_ok) else "degraded",
+        postgres=postgres_ok,
         qdrant=qdrant_ok,
         qdrant_points=qdrant_points,
     )

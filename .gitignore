@@ -34,12 +34,8 @@ secrets/
 *.pem
 *.key
 
-# Runtime data (SQLite + Qdrant + logs)
+# Runtime data (Qdrant 嵌入式落盘 + logs;Postgres 数据走 Docker volume)
 data/
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
 *.log
 logs/
 

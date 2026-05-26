@@ -78,6 +78,18 @@ RERANK_TOP_N: int = _env_int("RERANK_TOP_N", 5)
 # ─────────────────────────────────────────────────────────────
 CAVEATS_REVIEW_CHANGE_RATIO: float = _env_float("CAVEATS_REVIEW_CHANGE_RATIO", 0.20)
 CAVEATS_MAX_AGE_DAYS: int = _env_int("CAVEATS_MAX_AGE_DAYS", 30)
+# Review 规则过滤(§4.5.2 Step 1)
+REVIEW_MIN_LENGTH: int = _env_int("REVIEW_MIN_LENGTH", 20)
+REVIEW_DUP_CHAR_RATIO_MAX: float = _env_float("REVIEW_DUP_CHAR_RATIO_MAX", 0.5)
+# 嵌入批大小(OpenAI 单次最多 2048,但 chunk 大,保守 64)
+EMBEDDING_BATCH_SIZE: int = _env_int("EMBEDDING_BATCH_SIZE", 64)
+# Caveats LLM 输出长度上限(§4.5.3 / §4.5.4)
+CAVEATS_TEXT_MAX_CHARS: int = _env_int("CAVEATS_TEXT_MAX_CHARS", 200)
+# Caveats 输入 reviews 过滤阈值(§4.5.4):rating ≤ 3 或 sentiment < 阈值 才视为可能含负面信号
+CAVEATS_NEGATIVE_SENTIMENT_THRESHOLD: float = _env_float(
+    "CAVEATS_NEGATIVE_SENTIMENT_THRESHOLD", -0.2
+)
+CAVEATS_NEGATIVE_RATING_MAX: int = _env_int("CAVEATS_NEGATIVE_RATING_MAX", 3)
 
 # ─────────────────────────────────────────────────────────────
 # Agent(§4.6)
@@ -95,10 +107,21 @@ CACHE_BACKEND: str = _env("CACHE_BACKEND", "memory")  # "memory" | "redis"(V2)
 REDIS_URL: str = _env("REDIS_URL", "")  # V2 才填
 
 # ─────────────────────────────────────────────────────────────
+# 数据库(Postgres + asyncpg,需 `docker-compose up -d` 起)
+# ─────────────────────────────────────────────────────────────
+DATABASE_URL: str = _env(
+    "DATABASE_URL",
+    "postgresql+asyncpg://shopmind:shopmind@localhost:5432/shopmind",
+)
+TEST_DATABASE_URL: str = _env(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://shopmind:shopmind@localhost:5432/shopmind_test",
+)
+
+# ─────────────────────────────────────────────────────────────
 # 基础设施 / 数据路径
 # 设计偏离:默认指向 dataset/sample/(只读样品间),切全量改 .env
 # ─────────────────────────────────────────────────────────────
-SQLITE_PATH: str = _env("SQLITE_PATH", "./data/shopmind.db")
 QDRANT_PATH: str = _env("QDRANT_PATH", "./data/qdrant_storage/")
 INGEST_DATASET_DIR: str = _env("INGEST_DATASET_DIR", "./dataset/sample/")
 STATIC_FILES_DIR: str = _env("STATIC_FILES_DIR", "./dataset/sample/")
@@ -130,7 +153,6 @@ def _abs(p: str) -> Path:
     return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
 
 
-SQLITE_PATH_ABS: Path = _abs(SQLITE_PATH)
 QDRANT_PATH_ABS: Path = _abs(QDRANT_PATH)
 INGEST_DATASET_DIR_ABS: Path = _abs(INGEST_DATASET_DIR)
 STATIC_FILES_DIR_ABS: Path = _abs(STATIC_FILES_DIR)
@@ -149,15 +171,20 @@ __all__ = [
     "COARSE_THRESHOLD", "RERANK_THRESHOLD", "RERANK_TOP_N",
     # Indexing
     "CAVEATS_REVIEW_CHANGE_RATIO", "CAVEATS_MAX_AGE_DAYS",
+    "REVIEW_MIN_LENGTH", "REVIEW_DUP_CHAR_RATIO_MAX",
+    "EMBEDDING_BATCH_SIZE", "CAVEATS_TEXT_MAX_CHARS",
+    "CAVEATS_NEGATIVE_SENTIMENT_THRESHOLD", "CAVEATS_NEGATIVE_RATING_MAX",
     # Agent
     "MAX_AGENT_TURNS", "THINKING_BUDGET_TOKENS",
     # Cache
     "EMBEDDING_CACHE_SIZE", "RETRIEVAL_CACHE_SIZE", "RETRIEVAL_CACHE_TTL_SECONDS",
     "CACHE_BACKEND", "REDIS_URL",
+    # 数据库
+    "DATABASE_URL", "TEST_DATABASE_URL",
     # 路径
-    "PROJECT_ROOT", "SQLITE_PATH", "QDRANT_PATH", "INGEST_DATASET_DIR",
+    "PROJECT_ROOT", "QDRANT_PATH", "INGEST_DATASET_DIR",
     "STATIC_FILES_DIR", "BASE_URL", "QDRANT_COLLECTION_NAME",
-    "SQLITE_PATH_ABS", "QDRANT_PATH_ABS", "INGEST_DATASET_DIR_ABS",
+    "QDRANT_PATH_ABS", "INGEST_DATASET_DIR_ABS",
     "STATIC_FILES_DIR_ABS",
     # 多用户
     "DEFAULT_USER_ID", "USER_ID_HEADER",

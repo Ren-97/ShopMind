@@ -1,1 +1,1 @@
-"""Storage 层:SQLite (catalog + user state) + Qdrant (向量索引)."""
+"""Storage 层:Postgres (catalog + user state, JSONB properties) + Qdrant (向量索引)."""

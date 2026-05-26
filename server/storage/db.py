@@ -1,19 +1,15 @@
-"""
-SQLAlchemy v2 async engine + Session 工厂(对应 docs/design.md §4.4)。
+"""SQLAlchemy v2 async engine + Session 工厂(对应 docs/design.md §4.4)。
 
-- 后端 SQLite,driver aiosqlite,全程 async
-- SQLite 需手动 PRAGMA foreign_keys=ON 才生效外键约束
+- 后端:**Postgres + asyncpg**(`docker-compose up -d` 起本地实例)
 - DeclarativeBase 给 models.py 共享
 - get_session() 是 FastAPI Depends 用的 async generator
-- create_all() 给 lifespan 调用,首跑创建 12 张表
+- create_all() 给 lifespan 调用,首跑创建所有表 + GIN 索引
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from pathlib import Path
 
-from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -29,30 +25,12 @@ class Base(DeclarativeBase):
     """所有 ORM 模型共享的声明基类。"""
 
 
-def _ensure_parent_dir(sqlite_path: Path) -> None:
-    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-
-
-def _build_async_url(sqlite_path: Path) -> str:
-    # SQLAlchemy aiosqlite URL 形式:sqlite+aiosqlite:///绝对路径
-    return f"sqlite+aiosqlite:///{sqlite_path.as_posix()}"
-
-
-_ensure_parent_dir(config.SQLITE_PATH_ABS)
-
 engine: AsyncEngine = create_async_engine(
-    _build_async_url(config.SQLITE_PATH_ABS),
+    config.DATABASE_URL,
     echo=False,
     future=True,
+    pool_pre_ping=True,  # 容器重启 / 长时间空闲后自动重连
 )
-
-
-@event.listens_for(engine.sync_engine, "connect")
-def _enable_sqlite_fk(dbapi_conn, _conn_record) -> None:  # type: ignore[no-untyped-def]
-    """SQLite 默认不强制 FK,这里每个新连接开启 PRAGMA foreign_keys=ON。"""
-    cursor = dbapi_conn.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
 
 
 AsyncSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(

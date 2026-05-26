@@ -14,7 +14,7 @@
 - **前端**:**原生 Android**(Kotlin + Jetpack Compose,课题硬要求)
 - **LLM**:Claude Sonnet 4.6(主对话)+ Claude Haiku 4.5(Planner / Reranker)
 - **Embedding**:OpenAI `text-embedding-3-large`(3072 维)+ fastembed BM25 + jieba
-- **Storage**:SQLite(catalog + user state)+ Qdrant 嵌入模式(向量索引)
+- **Storage**:Postgres(catalog + user state,JSONB properties + GIN 索引,docker-compose 起本地)+ Qdrant 嵌入模式(向量索引)
 - **加分方向**:4.1 业务闭环(购物车 / 下单)+ 4.3 对话智能(多轮 / 反选 / 对比)+ caveats 诚实推荐;**4.2 多模态不做**
 - **核心要求**:**无幻觉**(课题减分第 1 条)
 
@@ -115,7 +115,8 @@
 uv sync
 uv run uvicorn server.main:app --reload --port 8000
 
-# Ingest(扫 JSON → SQLite → Qdrant,可重复跑,自动 per-field diff)
+# Ingest(扫 JSON → Postgres → Qdrant,可重复跑,自动 per-field diff)
+# 跑前先起 Postgres:`docker-compose up -d postgres`
 python scripts/ingest.py
 
 # Eval(跑 ground truth 15-20 case,出 markdown 报告)
@@ -146,7 +147,7 @@ OPENAI_API_KEY=sk-...
 | Caveats | `REVIEW_CHANGE_RATIO=0.20` / `MAX_AGE_DAYS=30` |
 | Agent | `MAX_AGENT_TURNS=5` / `THINKING_BUDGET_TOKENS=2048` |
 | Cache | `EMBEDDING_CACHE_SIZE=1000` / `RETRIEVAL_CACHE_SIZE=1000` / `RETRIEVAL_CACHE_TTL_SECONDS=300` |
-| 路径 | `SQLITE_PATH` / `QDRANT_PATH` / `INGEST_DATASET_DIR` |
+| 路径 | `DATABASE_URL`(Postgres)/ `QDRANT_PATH` / `INGEST_DATASET_DIR` |
 | 多用户 | `X-User-Id` header 默认 `"demo_user_1"`(无 auth,§4.6.8) |
 
 **任何写死的数字都该来自 config.py**,不写在业务代码里。

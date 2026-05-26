@@ -20,7 +20,6 @@ from sqlalchemy.orm import selectinload
 
 from server.storage.models import (
     Product,
-    ProductAttribute,
     ProductCaveats,
     ProductFAQ,
     ProductReview,
@@ -54,13 +53,15 @@ class CatalogRepo:
         *,
         include_inactive: bool = False,
     ) -> Product | None:
-        """单品 + skus/attributes/faqs/reviews/caveats 全量(给 Tool 拼 ProductSummary 用)。"""
+        """单品 + skus/faqs/reviews/caveats 全量(给 Tool 拼 ProductSummary 用)。
+
+        类目特化属性已经在 product.properties JSONB,不需要 selectinload。
+        """
         stmt = (
             select(Product)
             .where(Product.product_id == product_id)
             .options(
                 selectinload(Product.skus),
-                selectinload(Product.attributes),
                 selectinload(Product.faqs),
                 selectinload(Product.reviews),
                 selectinload(Product.caveats),
@@ -83,10 +84,7 @@ class CatalogRepo:
         stmt = (
             select(Product)
             .where(Product.product_id.in_(product_ids))
-            .options(
-                selectinload(Product.skus),
-                selectinload(Product.attributes),
-            )
+            .options(selectinload(Product.skus))
         )
         if not include_inactive:
             stmt = stmt.where(Product.is_active.is_(True))
@@ -111,18 +109,6 @@ class CatalogRepo:
         )
         for sku in skus:
             session.add(sku)
-
-    @staticmethod
-    async def replace_attributes(
-        session: AsyncSession, product_id: str, attrs: list[ProductAttribute]
-    ) -> None:
-        await session.execute(
-            ProductAttribute.__table__.delete().where(
-                ProductAttribute.product_id == product_id
-            )
-        )
-        for attr in attrs:
-            session.add(attr)
 
     @staticmethod
     async def replace_faqs(

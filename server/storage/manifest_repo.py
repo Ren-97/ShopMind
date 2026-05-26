@@ -37,11 +37,13 @@ class ManifestRepo:
         product_id: str,
         content_hash: str,
         chunk_count: int,
+        main_chunk_hash: str | None = None,
     ) -> None:
         manifest = IngestManifest(
             product_id=product_id,
             content_hash=content_hash,
             chunk_count=chunk_count,
+            main_chunk_hash=main_chunk_hash,
         )
         await session.merge(manifest)
 
