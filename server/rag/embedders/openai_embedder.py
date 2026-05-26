@@ -1,8 +1,6 @@
-"""OpenAI Embedder(`text-embedding-3-large`, 3072 维)。
+"""OpenAI Embedder(`text-embedding-3-large`, 3072 维)— 备选实现。
 
-- 异步:用 AsyncOpenAI 客户端,与 FastAPI / ingest 主流程一致
-- 批处理:单次最多 `EMBEDDING_BATCH_SIZE`(防 OpenAI request size 限制)
-- SDK 已内置重试,不再手写 retry 循环(对齐 CLAUDE.md §5)
+OpenAI embedding API 不区分 retrieval document / query,两方法内部走同一接口。
 """
 
 from __future__ import annotations
@@ -35,11 +33,11 @@ class OpenAIEmbedder:
             api_key=key,
             base_url=base_url if base_url is not None else config.OPENAI_BASE_URL,
         )
-        self.model: str = model or config.EMBEDDING_MODEL
+        self.model: str = model or config.OPENAI_EMBEDDING_MODEL
         self.dimension: int = dimension or config.EMBEDDING_DIMENSION
         self._batch_size: int = batch_size or config.EMBEDDING_BATCH_SIZE
 
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+    async def _embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
         out: list[list[float]] = []
@@ -48,3 +46,10 @@ class OpenAIEmbedder:
             resp = await self._client.embeddings.create(model=self.model, input=batch)
             out.extend([d.embedding for d in resp.data])
         return out
+
+    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        return await self._embed_batch(texts)
+
+    async def embed_query(self, text: str) -> list[float]:
+        result = await self._embed_batch([text])
+        return result[0]

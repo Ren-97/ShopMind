@@ -49,7 +49,9 @@ def _env_float(key: str, default: float) -> float:
 # ─────────────────────────────────────────────────────────────
 LLM_AGENT_MODEL: str = _env("LLM_AGENT_MODEL", "claude-sonnet-4-6")  # 主对话 + 离线 caveats
 LLM_FAST_MODEL: str = _env("LLM_FAST_MODEL", "claude-haiku-4-5")  # Planner + Reranker
-EMBEDDING_MODEL: str = _env("EMBEDDING_MODEL", "text-embedding-3-large")  # OpenAI
+EMBEDDING_PROVIDER: str = _env("EMBEDDING_PROVIDER", "gemini")  # "gemini" | "openai"
+GEMINI_EMBEDDING_MODEL: str = _env("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
+OPENAI_EMBEDDING_MODEL: str = _env("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large")
 EMBEDDING_DIMENSION: int = _env_int("EMBEDDING_DIMENSION", 3072)
 SPARSE_MODEL_NAME: str = _env("SPARSE_MODEL_NAME", "Qdrant/bm25")  # fastembed BM25
 
@@ -81,7 +83,7 @@ CAVEATS_MAX_AGE_DAYS: int = _env_int("CAVEATS_MAX_AGE_DAYS", 30)
 # Review 规则过滤(§4.5.2 Step 1)
 REVIEW_MIN_LENGTH: int = _env_int("REVIEW_MIN_LENGTH", 20)
 REVIEW_DUP_CHAR_RATIO_MAX: float = _env_float("REVIEW_DUP_CHAR_RATIO_MAX", 0.5)
-# 嵌入批大小(OpenAI 单次最多 2048,但 chunk 大,保守 64)
+# 嵌入批大小:Gemini 单次硬上限 100,OpenAI 2048;统一保守 64
 EMBEDDING_BATCH_SIZE: int = _env_int("EMBEDDING_BATCH_SIZE", 64)
 # Caveats LLM 输出长度上限(§4.5.3 / §4.5.4)
 CAVEATS_TEXT_MAX_CHARS: int = _env_int("CAVEATS_TEXT_MAX_CHARS", 200)
@@ -143,6 +145,7 @@ USER_ID_HEADER: str = "X-User-Id"
 ANTHROPIC_API_KEY: str | None = os.getenv("ANTHROPIC_API_KEY")
 OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL: str | None = os.getenv("OPENAI_BASE_URL") or None
+GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
 
 # ─────────────────────────────────────────────────────────────
 # 派生:绝对路径(避免业务层重复 resolve)
@@ -160,8 +163,9 @@ STATIC_FILES_DIR_ABS: Path = _abs(STATIC_FILES_DIR)
 
 __all__ = [
     # 模型
-    "LLM_AGENT_MODEL", "LLM_FAST_MODEL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSION",
-    "SPARSE_MODEL_NAME",
+    "LLM_AGENT_MODEL", "LLM_FAST_MODEL",
+    "EMBEDDING_PROVIDER", "GEMINI_EMBEDDING_MODEL", "OPENAI_EMBEDDING_MODEL",
+    "EMBEDDING_DIMENSION", "SPARSE_MODEL_NAME",
     # 检索
     "RETRIEVAL_DENSE_LIMIT", "RETRIEVAL_SPARSE_LIMIT", "RETRIEVAL_RRF_LIMIT",
     "RETRIEVAL_PRODUCT_TOP_N",
@@ -189,5 +193,5 @@ __all__ = [
     # 多用户
     "DEFAULT_USER_ID", "USER_ID_HEADER",
     # Secrets
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL",
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "GEMINI_API_KEY",
 ]

@@ -3,7 +3,8 @@
     "allow": [
       "Bash(python -m uv run --extra dev pytest tests/test_chunk1_sanity.py -v)",
       "Bash(uv run *)",
-      "Bash(uv sync *)"
+      "Bash(uv sync *)",
+      "PowerShell(Test-Path *)"
     ]
   }
 }

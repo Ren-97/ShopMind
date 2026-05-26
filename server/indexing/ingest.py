@@ -50,7 +50,7 @@ from server.indexing.manifest import (
 )
 from server.llm.caveats_extractor import extract_caveats
 from server.llm.review_sentiment import classify_review
-from server.rag.embedders import Embedder, OpenAIEmbedder
+from server.rag.embedders import Embedder, get_embedder
 from server.rag.sparse import JiebaBM25Encoder, SparseEncoder, SparseVector
 from server.storage.catalog_repo import CatalogRepo
 from server.storage.db import AsyncSessionLocal, create_all
@@ -184,7 +184,7 @@ async def _upsert_chunks(
     if not chunks:
         return
     texts = [c.text for c in chunks]
-    dense_vectors = await embedder.embed(texts)
+    dense_vectors = await embedder.embed_documents(texts)
     sparse_vectors = await sparse_encoder.encode(texts)
     points: list[qmodels.PointStruct] = []
     for chunk, dense, sparse in zip(chunks, dense_vectors, sparse_vectors, strict=True):
@@ -510,8 +510,8 @@ async def ingest_all(
     vector_index = get_vector_index()
     await vector_index.ensure_collection()
 
-    # 默认实现:OpenAI + jieba BM25(lazy init,首次调用才下载模型)
-    embedder = embedder or OpenAIEmbedder()
+    # 默认实现:按 EMBEDDING_PROVIDER 选 Gemini / OpenAI + jieba BM25(lazy init)
+    embedder = embedder or get_embedder()
     sparse_encoder = sparse_encoder or JiebaBM25Encoder()
 
     files = _scan_json_files(config.INGEST_DATASET_DIR_ABS)

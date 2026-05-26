@@ -487,7 +487,7 @@ async def test_product_properties_jsonb_contains_query(test_session_factory) -> 
         # 找 suitable_skin 含 "敏感肌" 的(用 @> 操作符)
         result = await session.execute(
             text("SELECT product_id FROM products "
-                 "WHERE properties @> :q::jsonb ORDER BY product_id"),
+                 "WHERE properties @> CAST(:q AS jsonb) ORDER BY product_id"),
             {"q": '{"suitable_skin": ["敏感肌"]}'},
         )
         ids = [row[0] for row in result.all()]

@@ -24,6 +24,7 @@ dependencies = [
     # LLM + Embedding
     "anthropic>=0.40.0",
     "openai>=1.55.0",
+    "google-genai>=0.3.0",
 
     # Vector + sparse retrieval
     "qdrant-client>=1.12.0",

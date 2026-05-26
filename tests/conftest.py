@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from server import config
+from server.storage import models  # noqa: F401 — 触发 ORM 模型注册到 Base.metadata
 from server.storage.db import Base
 
 
