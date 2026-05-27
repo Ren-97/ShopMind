@@ -14,10 +14,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from server.domain.types import HardConstraints
 from server.storage.models import (
     Product,
     ProductCaveats,
@@ -152,6 +153,56 @@ class CatalogRepo:
             select(func.count(Product.product_id)).where(Product.is_active.is_(True))
         )
         return int(result.scalar_one())
+
+    # ──────────────────────────────────────────────
+    # 硬约束过滤(§4.1.3 Filtered Semantic / Structured 入口)
+    # ──────────────────────────────────────────────
+    @staticmethod
+    async def list_product_ids_by_constraints(
+        session: AsyncSession,
+        constraints: HardConstraints,
+        *,
+        limit: int | None = None,
+    ) -> list[str]:
+        """按 HardConstraints 拼 SQL → 返回 product_id 白名单(防幻觉铁律 1)。
+
+        - 永远带 `is_active=TRUE`(不论 constraints 是否给)
+        - 价格过滤走 SKU EXISTS(§4.4.1 业务行为约定:"只要有一个 SKU 在区间就保留")
+        - properties_contains 走 JSONB `@>`(GIN 索引)
+        - `limit=None` 不截断(Filtered Semantic 把这个列表喂给 Qdrant filter,
+          一般 100-1000 商品级别可接受;后续上量再加默认 limit)
+        """
+        stmt = select(Product.product_id).where(Product.is_active.is_(True))
+
+        if constraints.category is not None:
+            stmt = stmt.where(Product.category == constraints.category)
+        if constraints.sub_category is not None:
+            stmt = stmt.where(Product.sub_category == constraints.sub_category)
+        if constraints.brand is not None:
+            stmt = stmt.where(Product.brand == constraints.brand)
+        if constraints.brand_exclude:
+            stmt = stmt.where(Product.brand.notin_(constraints.brand_exclude))
+        if constraints.in_stock is True:
+            stmt = stmt.where(Product.in_stock.is_(True))
+
+        # SKU 价格范围:EXISTS(SELECT 1 FROM skus WHERE product_id=... AND price BETWEEN ...)
+        if constraints.price_min is not None or constraints.price_max is not None:
+            sku_q = select(SKU.sku_id).where(SKU.product_id == Product.product_id)
+            if constraints.price_min is not None:
+                sku_q = sku_q.where(SKU.price >= constraints.price_min)
+            if constraints.price_max is not None:
+                sku_q = sku_q.where(SKU.price <= constraints.price_max)
+            stmt = stmt.where(exists(sku_q))
+
+        # 类目特化属性 → JSONB `@>`(GIN 索引加速)
+        if constraints.properties_contains:
+            stmt = stmt.where(Product.properties.contains(constraints.properties_contains))
+
+        if limit is not None:
+            stmt = stmt.limit(limit)
+
+        result = await session.execute(stmt)
+        return [row[0] for row in result.all()]
 
     @staticmethod
     async def list_all_product_ids(

@@ -4,7 +4,9 @@
       "Bash(python -m uv run --extra dev pytest tests/test_chunk1_sanity.py -v)",
       "Bash(uv run *)",
       "Bash(uv sync *)",
-      "PowerShell(Test-Path *)"
+      "PowerShell(Test-Path *)",
+      "Bash(python tests/test_chunk3_sanity.py)",
+      "Bash(python -m pytest tests/test_chunk3_sanity.py -x --no-header -q)"
     ]
   }
 }
