@@ -64,21 +64,30 @@ class RetrievalDispatcher:
         return f"retrieval:{hashlib.md5(raw.encode('utf-8')).hexdigest()}"
 
     def _resolve_strategy_name(self, plan: QueryPlan) -> str:
-        """决定最终走哪个策略(§4.1.4 + design §4.1.4 末尾的 filter 空退化)。"""
-        # 1) 低置信 → default
-        if plan.confidence < _CONFIDENCE_FLOOR:
-            return self._default
-        # 2) Filtered Semantic 但 filter 全空 → 退化为 Pure Semantic
+        """决定最终走哪个策略(§4.1.4)。
+
+        两段判断,串联应用:
+        1) 解析意图 → 候选策略:低置信 / 未知 query_type → 落到 default(filtered_semantic)
+        2) 候选若是 filtered_semantic 且 hard_constraints 全空 → 进一步退化到 pure_semantic
+           (空 filter 下 filtered_semantic 功能等价但多一次 SQL roundtrip)
+        """
+        # 第一段:意图 → 候选策略
         if (
-            plan.query_type == "filtered_semantic"
+            plan.confidence < _CONFIDENCE_FLOOR
+            or plan.query_type not in self._strategies
+        ):
+            chosen = self._default
+        else:
+            chosen = plan.query_type
+
+        # 第二段:filtered_semantic + 空 filter → pure_semantic
+        if (
+            chosen == "filtered_semantic"
             and plan.hard_constraints.is_empty()
             and "pure_semantic" in self._strategies
         ):
             return "pure_semantic"
-        # 3) 未知 query_type → default
-        if plan.query_type not in self._strategies:
-            return self._default
-        return plan.query_type
+        return chosen
 
     async def dispatch(self, plan: QueryPlan) -> RetrievalResult:
         cache_key = self._cache_key(plan)

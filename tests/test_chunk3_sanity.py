@@ -55,8 +55,38 @@ def test_hard_constraints_is_empty() -> None:
     assert HardConstraints().is_empty()
     assert not HardConstraints(brand="X").is_empty()
     assert not HardConstraints(price_max=500.0).is_empty()
-    assert not HardConstraints(properties_contains={"suitable_skin": ["敏感肌"]}).is_empty()
+    assert not HardConstraints(suitable_skin=["敏感肌"]).is_empty()
+    assert not HardConstraints(contains_alcohol=False).is_empty()
+    assert not HardConstraints(gender="男").is_empty()
+    assert not HardConstraints(age_group="25+").is_empty()
     assert not HardConstraints(brand_exclude=["A"]).is_empty()
+
+
+def test_hard_constraints_literal_enforcement() -> None:
+    """Pydantic Literal 校验:闭集外的值被拒(schema-constrained 防 drift)。"""
+    import pytest
+
+    from server.domain.types import HardConstraints
+
+    # 闭集外值应被拒
+    with pytest.raises(Exception):
+        HardConstraints(suitable_skin=["敏感皮"])  # 应为 "敏感肌"
+    with pytest.raises(Exception):
+        HardConstraints(gender="男士")  # 应为 "男"
+    with pytest.raises(Exception):
+        HardConstraints(age_group="28+")  # 不在闭集
+
+
+def test_hard_constraints_no_legacy_properties_contains() -> None:
+    """properties_contains 已删,LLM 即使写出来也会被 extra='forbid' 拒。"""
+    import pytest
+
+    from server.domain.types import HardConstraints
+
+    with pytest.raises(Exception):
+        HardConstraints.model_validate(
+            {"properties_contains": {"suitable_skin": ["敏感肌"]}}
+        )
 
 
 def test_query_plan_defaults_and_strip() -> None:
@@ -273,6 +303,31 @@ async def test_dispatcher_low_confidence_falls_back_to_default() -> None:
     assert r.strategy == "filtered_semantic"
 
 
+async def test_dispatcher_low_confidence_with_empty_filter_goes_to_pure_semantic() -> None:
+    """低置信 + filter 空 → 串联退化到 pure_semantic(不止 filtered_semantic)。"""
+    from server.domain.types import QueryPlan
+
+    filtered = _StubStrategy("filtered_semantic", ["f1"])
+    pure = _StubStrategy("pure_semantic", ["p1"])
+
+    d = _make_dispatcher({
+        "filtered_semantic": filtered,
+        "pure_semantic": pure,
+    })
+
+    # 低置信 + structured 类型 + filter 空 → 先落 default(filtered_semantic),再因
+    # filter 空退化到 pure_semantic
+    plan = QueryPlan(
+        query_type="structured",
+        confidence=0.3,
+        text_query="抗老",
+    )
+    r = await d.dispatch(plan)
+    assert filtered.calls == 0
+    assert pure.calls == 1
+    assert r.strategy == "pure_semantic"
+
+
 async def test_dispatcher_filter_empty_degrades_to_pure_semantic() -> None:
     from server.domain.types import QueryPlan
 
@@ -417,13 +472,108 @@ async def test_constraints_filter_basic(test_session_factory) -> None:
         )
         assert set(ids) == {"p1"}
 
-    # 4) JSONB @> 含敏感肌:p1, p2(p3 不含,p4 inactive)
+    # 4) suitable_skin first-class:p1, p2(p3 不含,p4 inactive)
     async with test_session_factory() as session:
         ids = await CatalogRepo.list_product_ids_by_constraints(
             session,
-            HardConstraints(properties_contains={"suitable_skin": ["敏感肌"]}),
+            HardConstraints(suitable_skin=["敏感肌"]),
         )
         assert set(ids) == {"p1", "p2"}
+
+
+async def test_constraints_filter_gender_hierarchy(test_session_factory) -> None:
+    """gender 闭集 + 通用层级展开:用户查"男" → 匹配"男"与"通用"商品。"""
+    from server.domain.types import HardConstraints
+    from server.storage.catalog_repo import CatalogRepo
+    from server.storage.models import Product, SKU
+
+    async with test_session_factory() as session:
+        session.add_all([
+            Product(product_id="m1", title="男款跑鞋", brand="A", category="服饰运动",
+                    sub_category="跑步鞋", base_price=500.0, in_stock=True,
+                    is_active=True, properties={"gender": "男"}),
+            Product(product_id="u1", title="通用瑜伽垫", brand="B", category="服饰运动",
+                    sub_category="瑜伽配件", base_price=200.0, in_stock=True,
+                    is_active=True, properties={"gender": "通用"}),
+            Product(product_id="f1", title="女款裤", brand="C", category="服饰运动",
+                    sub_category="瑜伽裤", base_price=300.0, in_stock=True,
+                    is_active=True, properties={"gender": "女"}),
+            SKU(sku_id="sm1", product_id="m1", properties={}, price=500.0),
+            SKU(sku_id="su1", product_id="u1", properties={}, price=200.0),
+            SKU(sku_id="sf1", product_id="f1", properties={}, price=300.0),
+        ])
+        await session.commit()
+
+    # 用户查"男" → 应同时匹配 m1(男)+ u1(通用),不匹配 f1(女)
+    async with test_session_factory() as session:
+        ids = await CatalogRepo.list_product_ids_by_constraints(
+            session, HardConstraints(gender="男")
+        )
+        assert set(ids) == {"m1", "u1"}
+
+    # 用户查"女" → 应同时匹配 f1(女)+ u1(通用)
+    async with test_session_factory() as session:
+        ids = await CatalogRepo.list_product_ids_by_constraints(
+            session, HardConstraints(gender="女")
+        )
+        assert set(ids) == {"f1", "u1"}
+
+
+async def test_constraints_filter_age_group_hierarchy(test_session_factory) -> None:
+    """age_group 闭集 + 通用层级展开。"""
+    from server.domain.types import HardConstraints
+    from server.storage.catalog_repo import CatalogRepo
+    from server.storage.models import Product, SKU
+
+    async with test_session_factory() as session:
+        session.add_all([
+            Product(product_id="a25", title="25+ 精华", brand="A", category="美妆护肤",
+                    sub_category="精华", base_price=300.0, in_stock=True,
+                    is_active=True, properties={"age_group": "25+"}),
+            Product(product_id="au", title="通用面霜", brand="B", category="美妆护肤",
+                    sub_category="面霜", base_price=200.0, in_stock=True,
+                    is_active=True, properties={"age_group": "通用"}),
+            Product(product_id="a30", title="30+ 抗老", brand="C", category="美妆护肤",
+                    sub_category="精华", base_price=400.0, in_stock=True,
+                    is_active=True, properties={"age_group": "30+"}),
+            SKU(sku_id="s25", product_id="a25", properties={}, price=300.0),
+            SKU(sku_id="su", product_id="au", properties={}, price=200.0),
+            SKU(sku_id="s30", product_id="a30", properties={}, price=400.0),
+        ])
+        await session.commit()
+
+    # 用户查 "25+" → 匹配 a25 + au(通用),不匹配 a30
+    async with test_session_factory() as session:
+        ids = await CatalogRepo.list_product_ids_by_constraints(
+            session, HardConstraints(age_group="25+")
+        )
+        assert set(ids) == {"a25", "au"}
+
+
+async def test_constraints_filter_bool_field(test_session_factory) -> None:
+    """contains_alcohol bool 字段精确匹配。"""
+    from server.domain.types import HardConstraints
+    from server.storage.catalog_repo import CatalogRepo
+    from server.storage.models import Product, SKU
+
+    async with test_session_factory() as session:
+        session.add_all([
+            Product(product_id="na", title="无酒精", brand="A", category="美妆护肤",
+                    sub_category="精华", base_price=100.0, in_stock=True,
+                    is_active=True, properties={"contains_alcohol": False}),
+            Product(product_id="ya", title="含酒精", brand="B", category="美妆护肤",
+                    sub_category="精华", base_price=100.0, in_stock=True,
+                    is_active=True, properties={"contains_alcohol": True}),
+            SKU(sku_id="sna", product_id="na", properties={}, price=100.0),
+            SKU(sku_id="sya", product_id="ya", properties={}, price=100.0),
+        ])
+        await session.commit()
+
+    async with test_session_factory() as session:
+        ids = await CatalogRepo.list_product_ids_by_constraints(
+            session, HardConstraints(contains_alcohol=False)
+        )
+        assert set(ids) == {"na"}
 
 
 async def test_constraints_filter_always_excludes_inactive(test_session_factory) -> None:

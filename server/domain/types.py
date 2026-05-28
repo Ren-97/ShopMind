@@ -1,14 +1,14 @@
 """跨模块共享的 Pydantic 类型(§4.1 / §4.2 / §4.3 共用)。
 
-设计偏离 design.md 说明:
-- design.md §4.1.2 把 `hard_constraints` 写成松散 `dict`。本实现改为强类型
-  `HardConstraints` 模型,理由:
-    1. SQL 过滤字段(category/brand/price_*/in_stock)是 enum-like 集合,
-       Pydantic 校验比手撸 dict 解析更稳;
-    2. 防止 Planner LLM 编造未知字段名(strict `extra="forbid"`);
-    3. 类目特化属性集中在 `properties_contains`(走 product.properties JSONB
-       `@>` 操作符),与 first-class 列字段分层清晰。
-  Planner prompt 在 Chunk 4 实施时按这个 schema 给 LLM tool_input_schema。
+设计原则:
+- `HardConstraints` 全部字段 first-class + `Literal` 闭集 — Schema-constrained
+  decoding,LLM 无法编造闭集外的值(防 key/value drift,§4.2)。
+- 开放词表(effects / scene / style / recipient / taste 等)放 `soft_preferences`,
+  走 hybrid retrieval + reranker 软打分,**不进 SQL**。
+- 类目特化闭集字段:仅相关类目用(美妆用 suitable_skin/contains_alcohol/...,
+  服饰用 gender 等),其它类目应该留 None。
+- 层级关系(gender "男"→{"男","通用"}、age_group "25+"→{"25+","通用"})在
+  Repo SQL 拼装时展开,不进 schema(避免污染 Planner 输出)。
 """
 
 from __future__ import annotations
@@ -16,6 +16,15 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# ─────────────────────────────────────────────────────────────
+# 闭集 enum(Schema-constrained 防 drift,LLM token-level 强制)
+# 这些值由真实 ecommerce_agent_dataset 全量扫描得到(详见 chunk4 实施记录)
+# ─────────────────────────────────────────────────────────────
+SuitableSkin = Literal["敏感肌", "干皮", "油皮", "混油皮", "中性肌"]
+Gender = Literal["男", "女", "通用"]
+AgeGroup = Literal["20+", "25+", "30+", "通用"]
+
 
 # ─────────────────────────────────────────────────────────────
 # Planner 输出
@@ -29,14 +38,17 @@ QueryType = Literal[
 
 
 class HardConstraints(BaseModel):
-    """SQL 可过滤的硬约束。
+    """SQL 可过滤的硬约束(first-class 字段 + Literal 闭集,防幻觉铁律 1)。
 
-    实现"防幻觉铁律 1":检索 Repo 层用这些字段拼 SQL WHERE,**不交给 LLM**。
+    所有闭集字段走 Literal,LLM 输出 token-level 强制 → 不可能漂到闭集外值。
+    新增闭集字段流程:本类加一个 first-class field + 闭集 Literal → 改 Repo
+    SQL → 改 Planner prompt 说明。**不要**用开放 dict(properties_contains),
+    那会重新打开 drift surface。
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    # First-class columns(products 表)
+    # ── 通用骨架(所有类目) ──
     category: str | None = None
     sub_category: str | None = None
     brand: str | None = None
@@ -44,12 +56,18 @@ class HardConstraints(BaseModel):
     price_min: float | None = None
     price_max: float | None = None
     in_stock: bool | None = None
-    # 类目特化属性 → product.properties JSONB(`@>` GIN 索引)
-    # 例:{"suitable_skin": ["敏感肌"], "contains_alcohol": False}
-    properties_contains: dict[str, Any] = Field(default_factory=dict)
+
+    # ── 美妆护肤特化闭集 ──
+    suitable_skin: list[SuitableSkin] = Field(default_factory=list)
+    contains_alcohol: bool | None = None
+    contains_fragrance: bool | None = None
+    age_group: AgeGroup | None = None
+
+    # ── 服饰运动特化闭集 ──
+    gender: Gender | None = None
 
     def is_empty(self) -> bool:
-        """无任何过滤条件 → 退化为 Pure Semantic。"""
+        """无任何过滤条件 → Dispatcher 退化为 Pure Semantic。"""
         return (
             self.category is None
             and self.sub_category is None
@@ -58,7 +76,11 @@ class HardConstraints(BaseModel):
             and self.price_min is None
             and self.price_max is None
             and self.in_stock is None
-            and not self.properties_contains
+            and not self.suitable_skin
+            and self.contains_alcohol is None
+            and self.contains_fragrance is None
+            and self.age_group is None
+            and self.gender is None
         )
 
 
@@ -127,9 +149,14 @@ class RetrievalResult(BaseModel):
 
 
 __all__ = [
+    # Planner schema
     "QueryType",
+    "SuitableSkin",
+    "Gender",
+    "AgeGroup",
     "HardConstraints",
     "QueryPlan",
+    # 检索输出
     "ChunkHit",
     "MatchedChunk",
     "ProductHit",
