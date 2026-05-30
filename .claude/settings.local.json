@@ -9,7 +9,19 @@
       "Bash(python -m pytest tests/test_chunk3_sanity.py -x --no-header -q)",
       "Bash(.venv/Scripts/python.exe *)",
       "Bash(PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -c ' *)",
-      "Bash(PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe *)"
+      "Bash(PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe *)",
+      "Bash(python -c \"from anthropic.types import ToolUseBlock; print\\(ToolUseBlock\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(./.venv/Scripts/python.exe -c ' *)",
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/test_chunk5_sanity.py -x -q)",
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/ -x --co -q)",
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/ -q --ignore=tests/test_chunk5_sanity.py -k \"not live\")",
+      "Bash(docker compose *)",
+      "Bash(docker pull *)",
+      "Bash(docker exec *)",
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/test_chunk5_sanity.py -v)",
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/ -q -k \"not live\")",
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/test_chunk5_sanity.py -q)"
     ]
   }
 }

@@ -153,14 +153,24 @@ class UserRepo:
         items: list[dict[str, Any]],
         address: str,
         total_price: float,
+        *,
+        recipient_name: str | None = None,
+        phone: str | None = None,
         status: str = "pending",
     ) -> Order:
+        """创建订单 — 收货三件套(address / recipient_name / phone)都做快照存进 Order。
+
+        调用方应在 place_order 时一次性从 user_profile 取这三个字段,后续 profile 改动
+        不影响历史订单(§4.4.2 业务行为)。
+        """
         order = Order(
             order_id=order_id,
             user_id=user_id,
             status=status,
             items=items,
             address=address,
+            recipient_name=recipient_name,
+            phone=phone,
             total_price=total_price,
         )
         session.add(order)
@@ -261,6 +271,35 @@ class UserRepo:
         msgs = list(result.scalars().all())
         msgs.reverse()  # 时间正序还回去
         return msgs
+
+    @staticmethod
+    async def search_messages(
+        session: AsyncSession,
+        user_id: str,
+        query: str,
+        *,
+        top_n: int = 5,
+    ) -> list[ChatHistory]:
+        """recall_history 工具用:跨 session 搜本用户历史消息(§4.6.1 兜底)。
+
+        V1:`ILIKE %query%` + 按时间倒排(近的优先)。语义检索(embed chat_history)
+        留给 V2 — 当前 chat_history 量小,关键词召回足够。
+        """
+        if not query or not query.strip():
+            return []
+        pattern = f"%{query.strip()}%"
+        stmt = (
+            select(ChatHistory)
+            .where(
+                ChatHistory.user_id == user_id,
+                ChatHistory.role.in_(("user", "assistant")),
+                ChatHistory.content.ilike(pattern),
+            )
+            .order_by(desc(ChatHistory.created_at), desc(ChatHistory.msg_id))
+            .limit(top_n)
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
 
 
 __all__ = ["UserRepo"]

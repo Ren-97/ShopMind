@@ -255,6 +255,12 @@ class CartItem(Base):
 
 
 class Order(Base):
+    """订单 — 下单时**快照**写入,后续 user_profile 改动不影响历史订单。
+
+    收货三件套(address / recipient_name / phone)都是快照 — 用户改名 / 改电话 / 改地址
+    后,旧订单卡片显示的应该仍是下单当时的值。
+    """
+
     __tablename__ = "orders"
 
     order_id: Mapped[str] = mapped_column(String, primary_key=True)  # UUID
@@ -264,6 +270,8 @@ class Order(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)  # pending/confirmed/cancelled
     items: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     address: Mapped[str] = mapped_column(Text, nullable=False)
+    recipient_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String, nullable=True)
     total_price: Mapped[float] = mapped_column(Float, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.current_timestamp(), nullable=False

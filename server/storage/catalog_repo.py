@@ -117,6 +117,38 @@ class CatalogRepo:
         result = await session.execute(stmt)
         return list(result.scalars().all())
 
+    @staticmethod
+    async def list_products_by_sku_ids(
+        session: AsyncSession,
+        sku_ids: Sequence[str],
+        *,
+        include_inactive: bool = False,
+    ) -> dict[str, Product]:
+        """按 sku_id 反查 product,返回 `{sku_id: Product}`(skus 已 eager load)。
+
+        cart / order tool 渲染或校验时需要 inactive 商品也能拿到自己抛"已下架",
+        传 `include_inactive=True`;其他场景默认遵循 §4.4.1 active 过滤。
+        """
+        if not sku_ids:
+            return {}
+        stmt = (
+            select(Product)
+            .join(SKU, SKU.product_id == Product.product_id)
+            .where(SKU.sku_id.in_(sku_ids))
+            .options(selectinload(Product.skus))
+        )
+        if not include_inactive:
+            stmt = stmt.where(Product.is_active.is_(True))
+        result = await session.execute(stmt)
+        products = list(result.scalars().unique().all())
+        out: dict[str, Product] = {}
+        sku_id_set = set(sku_ids)
+        for p in products:
+            for s in p.skus:
+                if s.sku_id in sku_id_set:
+                    out[s.sku_id] = p
+        return out
+
     # ──────────────────────────────────────────────
     # 写入(ingest 调用)
     # ──────────────────────────────────────────────
