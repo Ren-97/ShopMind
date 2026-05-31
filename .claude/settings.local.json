@@ -21,7 +21,15 @@
       "Bash(docker exec *)",
       "Bash(./.venv/Scripts/python.exe -m pytest tests/test_chunk5_sanity.py -v)",
       "Bash(./.venv/Scripts/python.exe -m pytest tests/ -q -k \"not live\")",
-      "Bash(./.venv/Scripts/python.exe -m pytest tests/test_chunk5_sanity.py -q)"
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/test_chunk5_sanity.py -q)",
+      "Bash(python -c \"from server import main; print\\('main imported OK'\\); print\\('routes:', sorted\\([r.path for r in main.app.routes if hasattr\\(r, 'path'\\)]\\)\\)\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\shuai\\\\Desktop\\\\ShopMind\\\\server\" -Recurse -File -Name)",
+      "Bash(python -m py_compile server/api/deps.py server/api/cart.py server/tools/cart.py server/tools/base.py)",
+      "Bash(python3 *)",
+      "Bash(api\")",
+      "Bash(Get-ChildItem -Force)",
+      "Bash(Select-Object Name)",
+      "PowerShell(Get-ChildItem -Path C:\\\\Users\\\\shuai\\\\Desktop\\\\ShopMind -Force | Where-Object { -not $_.PSIsContainer -or $_.Name -in 'scripts','tests','docs','server','data','dataset','.claude' } | Select-Object Mode, Name | Format-Table -AutoSize)"
     ]
   }
 }

@@ -10,18 +10,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from server import config
 from server.domain.types import MatchedChunk
 from server.rag.reranking.protocol import RankedProduct
 from server.storage.models import CartItem, Order, Product
 
-# 给 LLM 的 matched_chunks 单条最大长度(防 review 过长爆 context)
-_CHUNK_TEXT_MAX_CHARS: int = 300
 
-
-def _truncate(text: str, limit: int = _CHUNK_TEXT_MAX_CHARS) -> str:
-    if len(text) <= limit:
+def _truncate(text: str, limit: int | None = None) -> str:
+    cap = limit if limit is not None else config.MATCHED_CHUNK_TEXT_MAX_CHARS
+    if len(text) <= cap:
         return text
-    return text[: limit - 1] + "…"
+    return text[: cap - 1] + "…"
 
 
 def build_image_url(image_path: str | None, *, base_url: str) -> str | None:

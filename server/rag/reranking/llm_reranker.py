@@ -27,18 +27,16 @@ from server.storage.models import Product
 log = structlog.get_logger("shopmind.reranker.llm")
 
 
-# 单个 matched_chunk 文本截断长度(防止 review 过长拖爆 LLM 输入)
-_CHUNK_TEXT_MAX_CHARS: int = 300
-
 # main chunk 文本里 description 段的固定分隔符(由 server/indexing/chunking/main_chunker.py
 # `build_main_chunk_text` 写入)。改 chunker 格式时这两边要同步。
 _MAIN_DESCRIPTION_MARKER: str = "描述: "
 
 
-def _truncate(text: str, limit: int = _CHUNK_TEXT_MAX_CHARS) -> str:
-    if len(text) <= limit:
+def _truncate(text: str, limit: int | None = None) -> str:
+    cap = limit if limit is not None else config.MATCHED_CHUNK_TEXT_MAX_CHARS
+    if len(text) <= cap:
         return text
-    return text[: limit - 1] + "…"
+    return text[: cap - 1] + "…"
 
 
 def _strip_main_prefix(text: str) -> str:

@@ -170,12 +170,9 @@ class Orchestrator:
                     registry=self._registry,
                 )
                 tool_results_for_round.append((block.name, result, block))
-                # SSE 副作用:card / suggestions 立刻 emit
+                # SSE 副作用:cards 立刻 emit;suggestions 等本轮所有 tool 跑完一起 emit
                 for card in result.cards:
                     yield AgentEvent(type="card", data=card)
-                for sugg in result.suggestions:
-                    # SSE 协议把所有 suggestions 一次性推一条 event
-                    pass  # 见下方循环
 
             # suggestions:把同一轮的全部 suggestions 合并成一条 event(§4.6.11)
             merged_suggestions: list[dict[str, Any]] = []
