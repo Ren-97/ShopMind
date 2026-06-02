@@ -11,7 +11,7 @@ profile 主要由 chat 的 update_preference tool 写入;此端点给 Android �
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
@@ -45,7 +45,7 @@ class ProfilePatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     age: int | None = Field(default=None, ge=0, le=150)
-    gender: str | None = None
+    gender: Literal["male", "female"] | None = None
     height_cm: float | None = Field(default=None, gt=0, lt=300)
     weight_kg: float | None = Field(default=None, gt=0, lt=500)
     consumption_tier: str | None = None

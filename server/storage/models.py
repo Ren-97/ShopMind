@@ -214,7 +214,7 @@ class UserProfile(Base):
     )
     # 基础人口学
     age: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    gender: Mapped[str | None] = mapped_column(String, nullable=True)  # male/female/other
+    gender: Mapped[str | None] = mapped_column(String, nullable=True)  # male/female
     height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     # 消费倾向(soft 排序信号)

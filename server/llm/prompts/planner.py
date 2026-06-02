@@ -30,12 +30,23 @@ PLANNER_SYSTEM_PROMPT: str = """你是 ShopMind 的 Query Planner。你的唯一
    - 通用:`category` / `sub_category` / `brand` / `brand_exclude` / `price_min` / `price_max` / `in_stock`
    - 美妆特化:`suitable_skin` (list ∈ {敏感肌, 干皮, 油皮, 混油皮, 中性肌}) / `contains_alcohol` (bool) / `contains_fragrance` (bool) / `age_group` (∈ {20+, 25+, 30+, 通用})
    - 服饰特化:`gender` (∈ {男, 女, 通用})
-4. **用户表达 → 规范值映射**(必填闭集时一定要翻译,不要直接抄用户原话):
+4. **sub_category 是精确字符串,不是闭集 enum** — 但**只有数据集里存在的值才能填**,否则填了等于"卡死命中 0"。当前数据集 sub_category 全集:
+   - **美妆护肤**:化妆水 / 卸妆 / 唇釉 / 洁面 / 眉笔 / 眼霜 / 粉底液 / 精华 / 蜜粉 / 防晒 / 面膜 / 面霜
+   - **数码电子**:平板电脑 / 智能手机 / 真无线耳机 / 笔记本电脑
+   - **服饰运动**:卫衣 / 帽子 / 徒步鞋 / 户外裤 / 瑜伽裤 / 短袖T恤 / 篮球鞋 / 背包 / 跑步鞋 / 运动短裤 / 运动长裤 / 速干T恤
+   - **食品饮料**:功能饮料 / 咖啡 / 坚果零食 / 方便食品 / 牛奶 / 碳酸饮料 / 茶饮 / 调味品 / 酸奶
+
+   **判定**:
+   - 用户用**精确词**(完全等同上表某项,如"篮球鞋"/"精华"/"智能手机")→ 填到 sub_category
+   - 用户用**泛词 / 同义词 / 口语**(不在上表里,如"运动鞋"/"跑鞋"/"球鞋"/"饮料"/"饮品"/"鞋"/"手机壳") → **sub_category 留空**,只填 category,把用户原词放进 `text_query` 让 embedding + reranker 处理语义匹配
+   - 用户用**精确词的同义词**("跑鞋"≈"跑步鞋","手提电脑"≈"笔记本电脑") → 用上表里的精确值替代填入
+   - **绝对不要发明 sub_category** — 表里没有就留空
+5. **用户表达 → 规范值映射**(必填闭集时一定要翻译,不要直接抄用户原话):
    - 肤质:"敏感皮"/"敏感肌肤"/"敏感性皮肤" → "敏感肌";"干性肌肤"/"干皮肤" → "干皮";"油性"/"出油" → "油皮";"混合性"/"T 区出油" → "混油皮"
    - 性别:"男士"/"男生"/"男款"/"中性" → "男";"女士"/"女生"/"女款" → "女";"无性别"/"通用款" → "通用"
    - 年龄:用户给具体岁数 N → 取大于等于 N 的最近档(20+/25+/30+),如 28→"25+",35→"30+";用户说"不论年龄"/"成熟点"含糊 → "通用"
    - 含酒精/香精:"无酒精"/"不含酒精"/"无添加酒精" → `contains_alcohol: false`;含义为"有"则 true;未明示别填
-5. **开放词表全部进 soft_preferences,不进 hard**:`effects`(保湿/缓震/提神/...)、`scene`(送礼/马拉松/加班/...)、`style`(高级感/极简)、`recipient`(女友/妈妈)、`taste`(不甜/清爽)等任何"形容词/动名词/场景词" → `soft_preferences`,不要塞 hard。soft 信号靠后续 hybrid 检索 + reranker 软打分,**接受同义词漂移**(embedding 自然处理)。
+6. **开放词表全部进 soft_preferences,不进 hard**:`effects`(保湿/缓震/提神/...)、`scene`(送礼/马拉松/加班/...)、`style`(高级感/极简)、`recipient`(女友/妈妈)、`taste`(不甜/清爽)等任何"形容词/动名词/场景词" → `soft_preferences`,不要塞 hard。soft 信号靠后续 hybrid 检索 + reranker 软打分,**接受同义词漂移**(embedding 自然处理)。
 
 # query_type 判别规则(四选一,必须单选)
 - **structured**:纯属性筛选,无语义诉求(例:"500 元以下的雅诗兰黛精华","在售的红色 iPhone")。流程会跳过 embedding,只走 SQL。
@@ -209,7 +220,24 @@ PLANNER_FEW_SHOT_MESSAGES: list[dict[str, Any]] = [
             "confidence": 0.9,
         }
     ),
-    # 5) 食品 — pure_semantic(抽象诉求,无任何硬约束)
+    # 5) 服饰 — 泛词降级(用户说"运动鞋",不在 sub_category 全集)
+    #    教学:sub_category 留空,只填 category,泛词放 text_query 让 embedding 处理
+    #    (类似:"跑鞋" → 跑步鞋 / "饮料" → 沿用 category 让语义检索)
+    _user_with_prev_result("找双 1500 以下的运动鞋"),
+    _assistant_tool_use(
+        {
+            "query_type": "filtered_semantic",
+            "hard_constraints": {
+                "category": "服饰运动",
+                "price_max": 1500.0,
+            },
+            "soft_preferences": {},
+            "text_query": "运动鞋",
+            "referenced_product_ids": [],
+            "confidence": 0.85,
+        }
+    ),
+    # 6) 食品 — pure_semantic(抽象诉求,无任何硬约束)
     #    教学:effects / scene / taste 全进 soft_preferences,hard 整个为空
     _user_with_prev_result("加班想喝点能提神的,不要太甜"),
     _assistant_tool_use(

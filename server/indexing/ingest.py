@@ -35,6 +35,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server import config
+from server.indexing.brand_aliases import normalize_brand
 from server.indexing.chunking import (
     build_caveats_chunk_text,
     build_faq_chunk_text,
@@ -111,7 +112,7 @@ def parse_product_file(path: Path) -> tuple[ProductSpec, dict[str, Any]]:
     spec = ProductSpec(
         product_id=raw["product_id"],
         title=raw["title"],
-        brand=raw["brand"],
+        brand=normalize_brand(raw["brand"]),
         category=raw["category"],
         sub_category=raw["sub_category"],
         base_price=float(raw["base_price"]),
@@ -571,12 +572,17 @@ async def ingest_all(
 
 
 def print_summary(summary: IngestSummary) -> None:
-    """终端友好的总结(对应 §4.5.6 末尾)。"""
-    print(f"\n══ Ingest Summary ({summary.elapsed_sec:.1f}s) ══")
+    """终端友好的总结(对应 §4.5.6 末尾)。
+
+    用 ASCII 标记(OK/SKIP/FAIL)而不是 ✓ ~ ✗ —— Windows 默认终端是 GBK
+    编码,Unicode 几何符号会 UnicodeEncodeError(crash 在打印这一步,
+    数据已经写入但用户以为 ingest 失败,体验差)。
+    """
+    print(f"\n== Ingest Summary ({summary.elapsed_sec:.1f}s) ==")
     print(f"  Total JSON files : {summary.total_files}")
-    print(f"  ✓ Success        : {summary.success}")
-    print(f"  ~ Skipped (hash) : {summary.skipped_hash_match}")
-    print(f"  ✗ Failed         : {len(summary.failed)}")
+    print(f"  [OK]   Success   : {summary.success}")
+    print(f"  [SKIP] Hash match: {summary.skipped_hash_match}")
+    print(f"  [FAIL] Failed    : {len(summary.failed)}")
     if summary.failed:
         print("\nFailed products:")
         for pid, err in summary.failed:

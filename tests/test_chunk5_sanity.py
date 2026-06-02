@@ -62,7 +62,7 @@ def test_tool_registry_complete() -> None:
         "search_products",
         "compare_products",
         "manage_cart",
-        "place_order",
+        "start_checkout",
         "update_preference",
         "recall_history",
         "show_suggestions",

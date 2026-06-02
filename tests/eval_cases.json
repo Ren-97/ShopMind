@@ -1,0 +1,399 @@
+{
+  "_meta": {
+    "version": "1.0",
+    "description": "ShopMind eval ground truth. 20 cases × 9 scenarios × 4 categories.",
+    "case_count": 20,
+    "category_distribution": {
+      "美妆": 6,
+      "数码": 3,
+      "服饰": 5,
+      "食品": 4,
+      "无类目": 2
+    },
+    "scenarios": [
+      "基础推荐",
+      "反选",
+      "对比",
+      "多轮上下文",
+      "诚实拒答",
+      "防幻觉对抗",
+      "工具误触发回归",
+      "L4 caveats 来源标注",
+      "业务闭环"
+    ],
+    "field_schema": {
+      "id": "唯一 ID,kebab-case",
+      "scenario": "9 大场景之一(基础推荐 / 反选 / 对比 / 多轮上下文 / 诚实拒答 / 防幻觉对抗 / 工具误触发回归 / 场景化跨类目 / 业务闭环)",
+      "category": "dataset 类目(美妆护肤 / 数码电子 / 服饰运动 / 食品饮料 / 无)",
+      "tags": "core / edge / regression_guard / hallucination / business / multi_turn / session_state ...",
+      "layers": "本 case 测试的 layer 子集 [1, 2, 3]",
+      "user_id": "eval_user_1 (EvalAlice) / eval_user_2 (EvalBob) / eval_user_3 (EvalCharlie)",
+      "profile_overrides": "可选,runner 跑前临时改 profile 字段(value=null 表示清空)",
+      "session_state_seed": "可选,跑前注入 session_state(测多轮沉淀 / 代词指代)",
+      "history": "可选,Anthropic messages 格式的前置对话(测多轮上下文)",
+      "cart_seed": "可选,跑前往 cart_items 表写,业务闭环 case 用",
+      "query": "本轮用户输入",
+      "expected_query_type": "Planner 应输出的 query_type(L1)",
+      "expected_hard_constraints": "完整精确匹配(L1)",
+      "expected_hard_constraints_contains": "部分匹配,只检查指定字段(L1)",
+      "expected_soft_preferences_contains": "soft preferences 部分匹配(L1)",
+      "expected_referenced_product_ids": "id_lookup case 的 product_ids(L1)",
+      "expected_referenced_count_min": "id_lookup 至少引用几个商品(L1)",
+      "expected_tool_calls_include": "Agent 必须调用的 tool 名(L2)",
+      "expected_tool_calls_not_include": "Agent 绝对不能调用的 tool(L2)",
+      "expected_tool_calls_min": "至少调用 N 次 tool(场景化组合 case 用)",
+      "expected_top_5_product_ids_contains": "Top-5 检索结果必须包含的 product_id(L2)",
+      "expected_top_5_excludes_brands": "Top-5 检索结果不能出现的品牌(L2)",
+      "expected_categories_covered_any": "跨类目 case:至少覆盖以下任一类目(L2)",
+      "expected_no_match": "是否应触发 no_match 兜底(L2)",
+      "expected_response_must_contain_any": "回复必须包含以下任一关键词(L2)",
+      "expected_response_must_not_contain": "回复绝不能包含以下关键词(L2/L3)",
+      "expected_profile_unchanged_fields": "跑完这些 profile 字段必须未变(L2)",
+      "expected_cart_change": "购物车变化(L2)",
+      "judge_focus": "L3 重点判分维度",
+      "notes": "人类说明 + [VERIFY] 标记草稿期需 review 的具体值"
+    }
+  },
+
+  "cases": [
+    {
+      "id": "basic_beauty_sensitive",
+      "scenario": "基础推荐",
+      "category": "美妆护肤",
+      "tags": ["core", "filtered_semantic"],
+      "layers": [1, 2, 3],
+      "user_id": "eval_user_1",
+      "query": "推荐适合敏感肌的保湿精华,500 以内",
+      "expected_query_type": "filtered_semantic",
+      "expected_hard_constraints": {
+        "category": "美妆护肤",
+        "sub_category": "精华",
+        "suitable_skin": ["敏感肌"],
+        "price_max": 500.0
+      },
+      "expected_soft_preferences_contains": {"effects": ["保湿"]},
+      "expected_tool_calls_include": ["search_products"],
+      "expected_no_match": false,
+      "judge_focus": ["faithfulness", "source_attribution"],
+      "notes": "标准 filtered_semantic 主路径。sub_category=「精华」已核 dataset 确认。"
+    },
+
+    {
+      "id": "basic_digital_apple_structured",
+      "scenario": "基础推荐",
+      "category": "数码电子",
+      "tags": ["core", "structured"],
+      "layers": [1, 2],
+      "user_id": "eval_user_2",
+      "query": "8000 块以下在售的苹果手机",
+      "expected_query_type": "structured",
+      "expected_hard_constraints": {
+        "category": "数码电子",
+        "sub_category": "智能手机",
+        "brand": "Apple 苹果",
+        "price_max": 8000.0,
+        "in_stock": true
+      },
+      "expected_tool_calls_include": ["search_products"],
+      "expected_no_match": false,
+      "notes": "纯属性筛选,无 text_query,走 structured 路径跳过 embedding。sub_category=「智能手机」、brand=「Apple 苹果」已核 dataset 确认。"
+    },
+
+    {
+      "id": "negation_clothing_brand",
+      "scenario": "反选",
+      "category": "服饰运动",
+      "tags": ["core", "negation"],
+      "layers": [1, 2],
+      "user_id": "eval_user_3",
+      "query": "推荐双跑步鞋,不要 Nike 和阿迪达斯,1500 以内",
+      "expected_query_type": "filtered_semantic",
+      "expected_hard_constraints": {
+        "category": "服饰运动",
+        "sub_category": "跑步鞋",
+        "brand_exclude": ["Nike", "阿迪达斯"],
+        "price_max": 1500.0,
+        "gender": "男"
+      },
+      "expected_tool_calls_include": ["search_products"],
+      "expected_top_5_excludes_brands": ["Nike", "耐克", "阿迪达斯"],
+      "notes": "反选必走 hard_constraints.brand_exclude,不能塞 text_query。"
+    },
+
+    {
+      "id": "session_rejected_brands_food",
+      "scenario": "反选",
+      "category": "食品饮料",
+      "tags": ["core", "multi_turn", "session_state"],
+      "layers": [1, 2],
+      "user_id": "eval_user_3",
+      "session_state_seed": {
+        "rejected_brands": ["红牛"],
+        "current_topic": "功能饮料"
+      },
+      "query": "再推荐一款别的功能饮料",
+      "expected_query_type": "filtered_semantic",
+      "expected_hard_constraints_contains": {
+        "brand_exclude": ["红牛"]
+      },
+      "expected_top_5_excludes_brands": ["红牛"],
+      "notes": "上一轮已经 reject 红牛,本轮 query 没提,Planner 应自动从 session_state 并入 brand_exclude"
+    },
+
+    {
+      "id": "compare_digital_two_brands",
+      "scenario": "对比",
+      "category": "数码电子",
+      "tags": ["core", "id_lookup"],
+      "layers": [1, 2],
+      "user_id": "eval_user_2",
+      "query": "iPhone 17 Pro 和华为 Pura 90 Pro 哪个拍照更好",
+      "expected_query_type": "id_lookup",
+      "expected_referenced_count_min": 2,
+      "expected_tool_calls_include": ["compare_products"],
+      "judge_focus": ["faithfulness"],
+      "notes": "对比 query 应触发 id_lookup → Agent 先 search 拿到具体 product_id 再 compare。已核 dataset:p_digital_001=iPhone 17 Pro,p_digital_002=华为 Pura 90 Pro。"
+    },
+
+    {
+      "id": "compare_clothing_pronoun",
+      "scenario": "对比",
+      "category": "服饰运动",
+      "tags": ["core", "multi_turn", "id_lookup"],
+      "layers": [1, 2],
+      "user_id": "eval_user_3",
+      "session_state_seed": {
+        "last_shown_products": ["p_clothes_007", "p_clothes_008", "p_clothes_009"],
+        "current_topic": "跑步鞋"
+      },
+      "query": "对比一下这三款",
+      "expected_query_type": "id_lookup",
+      "expected_referenced_product_ids": ["p_clothes_007", "p_clothes_008", "p_clothes_009"],
+      "expected_tool_calls_include": ["compare_products"],
+      "notes": "代词「这三款」+ last_shown_products 非空 → id_lookup。已核 dataset:p_clothes_007=耐克 Nike Air Zoom Pegasus 41,p_clothes_008=阿迪达斯 Ultraboost 5,p_clothes_009=HOKA Clifton 9。"
+    },
+
+    {
+      "id": "pronoun_beauty_price",
+      "scenario": "多轮上下文",
+      "category": "美妆护肤",
+      "tags": ["core", "multi_turn", "id_lookup"],
+      "layers": [1, 2],
+      "user_id": "eval_user_1",
+      "session_state_seed": {
+        "last_shown_products": ["p_beauty_001"]
+      },
+      "query": "刚说那款多少钱",
+      "expected_query_type": "id_lookup",
+      "expected_referenced_product_ids": ["p_beauty_001"],
+      "expected_tool_calls_include": ["search_products"],
+      "judge_focus": ["faithfulness"],
+      "notes": "代词指代单个 last_shown 商品。p_beauty_001 我之前验证过是雅诗兰黛小棕瓶,价格 720 起"
+    },
+
+    {
+      "id": "price_cap_carry_clothing",
+      "scenario": "多轮上下文",
+      "category": "服饰运动",
+      "tags": ["core", "multi_turn", "session_state"],
+      "layers": [1, 2],
+      "user_id": "eval_user_3",
+      "session_state_seed": {
+        "mentioned_price_cap": 500.0,
+        "current_topic": "运动鞋"
+      },
+      "query": "再换一双款式",
+      "expected_query_type": "filtered_semantic",
+      "expected_hard_constraints_contains": {
+        "price_max": 500.0
+      },
+      "notes": "上轮 500 上限,本轮没提,Planner 应继承 price_max"
+    },
+
+    {
+      "id": "topic_switch_food_to_clothing",
+      "scenario": "多轮上下文",
+      "category": "食品饮料→服饰运动",
+      "tags": ["edge", "multi_turn"],
+      "layers": [1, 2],
+      "user_id": "eval_user_3",
+      "session_state_seed": {
+        "current_topic": "饮料",
+        "discussed_products": ["p_food_001", "p_food_002"]
+      },
+      "query": "换个话题,推荐双跑步鞋",
+      "expected_query_type": "filtered_semantic",
+      "expected_hard_constraints_contains": {
+        "category": "服饰运动",
+        "sub_category": "跑步鞋"
+      },
+      "notes": "用户主动切类目,session_state.current_topic=「饮料」不应污染新 query"
+    },
+
+    {
+      "id": "no_match_absurd",
+      "scenario": "诚实拒答",
+      "category": "无",
+      "tags": ["core", "no_match"],
+      "layers": [1, 2, 3],
+      "user_id": "eval_user_1",
+      "query": "推荐一台火箭引擎",
+      "expected_no_match": true,
+      "expected_response_must_contain_any": ["没找到", "符合", "不在", "暂时"],
+      "expected_response_must_not_contain": ["推荐", "建议你买"],
+      "judge_focus": ["faithfulness"],
+      "notes": "dataset 完全没有的类目,必须诚实拒答 + 不能硬推任何商品"
+    },
+
+    {
+      "id": "no_match_overconstrained_beauty",
+      "scenario": "诚实拒答",
+      "category": "美妆护肤",
+      "tags": ["core", "no_match"],
+      "layers": [1, 2],
+      "user_id": "eval_user_1",
+      "query": "10 块以下的雅诗兰黛精华",
+      "expected_query_type": "structured",
+      "expected_hard_constraints_contains": {
+        "brand": "雅诗兰黛",
+        "price_max": 10.0
+      },
+      "expected_no_match": true,
+      "expected_response_must_contain_any": ["没找到", "放宽", "提高", "预算"],
+      "notes": "价格约束太严,Planner 抽对了但 SQL 返回空 → no_match。理想行为:Agent 软建议「放宽预算到 XX 有 N 款」(我们之前讨论的「no_match 软兜底」)"
+    },
+
+    {
+      "id": "anti_hall_nonexistent_sku_beauty",
+      "scenario": "防幻觉对抗",
+      "category": "美妆护肤",
+      "tags": ["core", "regression_guard", "hallucination"],
+      "layers": [2, 3],
+      "user_id": "eval_user_1",
+      "session_state_seed": {
+        "last_shown_products": ["p_beauty_001"]
+      },
+      "query": "这款有 200ml 装吗",
+      "expected_tool_calls_include": ["search_products"],
+      "expected_response_must_contain_any": ["没有", "暂时", "没看到", "30ml", "50ml", "75ml"],
+      "expected_response_must_not_contain": ["200ml"],
+      "judge_focus": ["faithfulness"],
+      "notes": "p_beauty_001 实际 SKU 是 30/50/75ml,问 200ml 必须诚实拒答,不能编出 200ml 的存在"
+    },
+
+    {
+      "id": "anti_hall_unknown_attr_digital",
+      "scenario": "防幻觉对抗",
+      "category": "数码电子",
+      "tags": ["core", "regression_guard", "hallucination"],
+      "layers": [2, 3],
+      "user_id": "eval_user_2",
+      "query": "推荐一款支持 8K 屏的手机",
+      "expected_response_must_contain_any": ["没有", "不支持", "暂时没", "信息"],
+      "expected_response_must_not_contain": ["8K 屏幕的手机有", "推荐这款 8K"],
+      "judge_focus": ["faithfulness"],
+      "notes": "8K 屏幕手机现实里基本不存在,dataset 也不会有,Agent 必须诚实"
+    },
+
+    {
+      "id": "anti_hall_unknown_brand_food",
+      "scenario": "防幻觉对抗",
+      "category": "食品饮料",
+      "tags": ["core", "hallucination"],
+      "layers": [2, 3],
+      "user_id": "eval_user_3",
+      "query": "推荐 Yeti 牌的保温杯",
+      "expected_no_match": true,
+      "expected_response_must_not_contain": ["Yeti"],
+      "judge_focus": ["faithfulness"],
+      "notes": "Yeti 不在 dataset 食品品牌清单,必须诚实拒答,不能编出 Yeti 商品"
+    },
+
+    {
+      "id": "no_tool_chitchat",
+      "scenario": "工具误触发回归",
+      "category": "无",
+      "tags": ["core", "regression_guard"],
+      "layers": [2],
+      "user_id": "eval_user_1",
+      "query": "你好",
+      "expected_tool_calls_not_include": ["search_products", "compare_products", "update_preference", "manage_cart"],
+      "expected_response_must_contain_any": ["你好", "导购", "帮", "推荐"],
+      "notes": "闲聊 Agent 直接简短回应,不调任何 tool(CLAUDE.md §5 绝对要求)"
+    },
+
+    {
+      "id": "no_profile_pollution_search_clothing",
+      "scenario": "工具误触发回归",
+      "category": "服饰运动",
+      "tags": ["core", "regression_guard"],
+      "layers": [2],
+      "user_id": "eval_user_2",
+      "query": "给我找一件女士运动外套",
+      "expected_tool_calls_include": ["search_products"],
+      "expected_tool_calls_not_include": ["update_preference"],
+      "expected_profile_unchanged_fields": ["gender"],
+      "notes": "用户搜女士款 ≠ 用户是女性。这条 case 直接保护今天加进 prompt 的负例「找女士款不写 profile」"
+    },
+
+    {
+      "id": "no_profile_pollution_gift_beauty",
+      "scenario": "工具误触发回归",
+      "category": "美妆护肤",
+      "tags": ["core", "regression_guard"],
+      "layers": [2],
+      "user_id": "eval_user_2",
+      "query": "我女朋友是敏感肌,给她推荐一款精华",
+      "expected_tool_calls_include": ["search_products"],
+      "expected_tool_calls_not_include": ["update_preference"],
+      "expected_profile_unchanged_fields": ["preferences"],
+      "notes": "代购语境对方属性「敏感肌」不能写入本人 profile.preferences.skin_type。CLAUDE.md §4.6.3 明确规则"
+    },
+
+    {
+      "id": "caveats_source_attribution_beauty",
+      "scenario": "L4 caveats 来源标注",
+      "category": "美妆护肤",
+      "tags": ["core", "source_attribution"],
+      "layers": [2, 3],
+      "user_id": "eval_user_1",
+      "query": "推荐一款防晒霜",
+      "expected_tool_calls_include": ["search_products"],
+      "expected_no_match": false,
+      "judge_focus": ["faithfulness", "source_attribution"],
+      "notes": "L3 judge 重点验证 source_attribution(§4.6.7 事实分层 L3/L4):若返回商品的 caveats 非空或回复引用了用户评论(matched_chunks.chunk_type='review'),Agent 文本必须用「根据用户评论 / 有部分用户反馈 / 用户提到」类标注语,不能伪装成商家声明。无 caveats 商品则此维度自动 N/A。"
+    },
+
+    {
+      "id": "cart_add_food_via_search",
+      "scenario": "业务闭环",
+      "category": "食品饮料",
+      "tags": ["core", "business"],
+      "layers": [2],
+      "user_id": "eval_user_2",
+      "session_state_seed": {
+        "last_shown_products": ["p_food_001"]
+      },
+      "query": "把这个加到购物车",
+      "expected_tool_calls_include": ["manage_cart"],
+      "expected_cart_change": {"action": "add", "product_id": "p_food_001"},
+      "notes": "Agent 应先 search_products 取 sku_id 再 manage_cart add,绝不编 sku_id。已核 dataset:p_food_001=三顿半数字星球系列咖啡。"
+    },
+
+    {
+      "id": "order_address_missing_clothing",
+      "scenario": "业务闭环",
+      "category": "服饰运动",
+      "tags": ["core", "business", "fallback"],
+      "layers": [2],
+      "user_id": "eval_user_3",
+      "profile_overrides": {"address": null},
+      "cart_seed": [{"sku_id": "s_p_clothes_001_1", "qty": 1}],
+      "query": "下单",
+      "expected_tool_calls_include": ["start_checkout"],
+      "expected_tool_calls_not_include": ["update_preference"],
+      "expected_response_must_contain_any": ["地址", "寄到", "收货"],
+      "notes": "start_checkout 应触发 address_missing 兜底,Agent 礼貌引导用户填地址。**不能调 update_preference 自己编地址**。已核 dataset:s_p_clothes_001_1=优衣库 U AIRism T 恤 第 1 个 SKU。"
+    }
+  ]
+}

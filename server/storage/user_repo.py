@@ -160,7 +160,7 @@ class UserRepo:
     ) -> Order:
         """创建订单 — 收货三件套(address / recipient_name / phone)都做快照存进 Order。
 
-        调用方应在 place_order 时一次性从 user_profile 取这三个字段,后续 profile 改动
+        调用方在下单时一次性从 user_profile 取这三个字段,后续 profile 改动
         不影响历史订单(§4.4.2 业务行为)。
         """
         order = Order(

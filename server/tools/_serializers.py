@@ -226,6 +226,61 @@ def cart_card(
     }
 
 
+def checkout_card(
+    cart_items: list[CartItem],
+    *,
+    sku_to_product: dict[str, Product],
+    address: str,
+    recipient_name: str | None,
+    phone: str | None,
+    base_url: str,
+) -> dict[str, Any]:
+    """checkout card(§4.7.5)。start_checkout tool 返回 — 准备下单的快照。
+
+    与 cart card 的区别:多了 address / recipient_name / phone,表达 "准备寄到哪里"。
+    前端收到后渲染 [去结算] 按钮 → OrderConfirmScreen → POST /order 真下单。
+
+    sku_to_product 由 caller 预 JOIN 拼好传入,本函数不再做 DB 访问。
+    """
+    items_data: list[dict[str, Any]] = []
+    total = 0.0
+    for it in cart_items:
+        product = sku_to_product.get(it.sku_id)
+        sku = next(
+            (s for s in (product.skus if product else []) if s.sku_id == it.sku_id),
+            None,
+        )
+        unit_price = float(sku.price) if sku is not None else 0.0
+        subtotal = unit_price * int(it.qty)
+        total += subtotal
+        items_data.append(
+            {
+                "sku_id": it.sku_id,
+                "product_id": product.product_id if product else None,
+                "title": product.title if product else "",
+                "image_url": (
+                    build_image_url(product.image_path, base_url=base_url)
+                    if product
+                    else None
+                ),
+                "qty": int(it.qty),
+                "unit_price": unit_price,
+                "subtotal": subtotal,
+            }
+        )
+    return {
+        "type": "checkout",
+        "data": {
+            "items": items_data,
+            "address": address,
+            "recipient_name": recipient_name,
+            "phone": phone,
+            "total_price": round(total, 2),
+            "item_count": len(items_data),
+        },
+    }
+
+
 def order_card(order: Order) -> dict[str, Any]:
     """order card(§4.7.5)。全字段从 Order 快照读 — 不再依赖 user_profile 实时值。"""
     items = list(order.items or [])
@@ -251,6 +306,7 @@ def order_card(order: Order) -> dict[str, Any]:
 __all__ = [
     "build_image_url",
     "cart_card",
+    "checkout_card",
     "order_card",
     "product_card",
     "product_summary_from_db",

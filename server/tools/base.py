@@ -142,7 +142,7 @@ def build_tool_registry() -> dict[str, Tool]:
     """
     from server.tools.cart import ManageCartTool
     from server.tools.compare import CompareProductsTool
-    from server.tools.order import PlaceOrderTool
+    from server.tools.order import StartCheckoutTool
     from server.tools.preference import UpdatePreferenceTool
     from server.tools.recall import RecallHistoryTool
     from server.tools.search import SearchProductsTool
@@ -152,7 +152,7 @@ def build_tool_registry() -> dict[str, Tool]:
         SearchProductsTool(),
         CompareProductsTool(),
         ManageCartTool(),
-        PlaceOrderTool(),
+        StartCheckoutTool(),
         UpdatePreferenceTool(),
         RecallHistoryTool(),
         ShowSuggestionsTool(),

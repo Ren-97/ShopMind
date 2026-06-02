@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from server.domain.types import HardConstraints
+from server.indexing.brand_aliases import normalize_brand
 from server.storage.models import (
     Product,
     ProductCaveats,
@@ -237,10 +238,13 @@ class CatalogRepo:
             stmt = stmt.where(Product.category == constraints.category)
         if constraints.sub_category is not None:
             stmt = stmt.where(Product.sub_category == constraints.sub_category)
+        # L3 兜底:Planner 抽的是用户原话,这里归一到 DB 规范名(L1 ingest 已统一)
+        # 避免用户说 "Nike" / "苹果" 等英文/简写别名时,SQL 漏过 brand="耐克" / "Apple 苹果"
         if constraints.brand is not None:
-            stmt = stmt.where(Product.brand == constraints.brand)
+            stmt = stmt.where(Product.brand == normalize_brand(constraints.brand))
         if constraints.brand_exclude:
-            stmt = stmt.where(Product.brand.notin_(constraints.brand_exclude))
+            normalized_excludes = list({normalize_brand(b) for b in constraints.brand_exclude if b})
+            stmt = stmt.where(Product.brand.notin_(normalized_excludes))
         if constraints.in_stock is True:
             stmt = stmt.where(Product.in_stock.is_(True))
 

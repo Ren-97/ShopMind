@@ -29,7 +29,9 @@
       "Bash(api\")",
       "Bash(Get-ChildItem -Force)",
       "Bash(Select-Object Name)",
-      "PowerShell(Get-ChildItem -Path C:\\\\Users\\\\shuai\\\\Desktop\\\\ShopMind -Force | Where-Object { -not $_.PSIsContainer -or $_.Name -in 'scripts','tests','docs','server','data','dataset','.claude' } | Select-Object Mode, Name | Format-Table -AutoSize)"
+      "PowerShell(Get-ChildItem -Path C:\\\\Users\\\\shuai\\\\Desktop\\\\ShopMind -Force | Where-Object { -not $_.PSIsContainer -or $_.Name -in 'scripts','tests','docs','server','data','dataset','.claude' } | Select-Object Mode, Name | Format-Table -AutoSize)",
+      "Bash(python -X utf8 -c ' *)",
+      "Bash(del brands_tmp.txt)"
     ]
   }
 }

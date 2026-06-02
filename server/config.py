@@ -99,7 +99,7 @@ CAVEATS_NEGATIVE_RATING_MAX: int = _env_int("CAVEATS_NEGATIVE_RATING_MAX", 3)
 # Agent(§4.6)
 # ─────────────────────────────────────────────────────────────
 MAX_AGENT_TURNS: int = _env_int("MAX_AGENT_TURNS", 5)
-THINKING_BUDGET_TOKENS: int = _env_int("THINKING_BUDGET_TOKENS", 2048)
+THINKING_BUDGET_TOKENS: int = _env_int("THINKING_BUDGET_TOKENS", 0)
 AGENT_MAX_TOKENS: int = _env_int("AGENT_MAX_TOKENS", 4096)
 AGENT_RECENT_TURNS: int = _env_int("AGENT_RECENT_TURNS", 5)  # 主对话看的最近轮数
 COMPARE_MIN_ITEMS: int = _env_int("COMPARE_MIN_ITEMS", 2)
@@ -157,6 +157,15 @@ OPENAI_BASE_URL: str | None = os.getenv("OPENAI_BASE_URL") or None
 GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
 
 # ─────────────────────────────────────────────────────────────
+# Eval L3 Judge:Doubao via 火山引擎 Ark(OpenAI-compatible)
+# 跨模型 judging:避免 Self-Enhancement Bias(Zheng et al. 2023)
+# 没配 ARK_API_KEY → L3 优雅 skip,只跑 L1+L2
+# ─────────────────────────────────────────────────────────────
+ARK_API_KEY: str | None = os.getenv("ARK_API_KEY")
+ARK_BASE_URL: str = _env("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3/")
+DOUBAO_JUDGE_MODEL: str = _env("DOUBAO_JUDGE_MODEL", "ep-20260514111645-lmgt2")
+
+# ─────────────────────────────────────────────────────────────
 # 派生:绝对路径(避免业务层重复 resolve)
 # ─────────────────────────────────────────────────────────────
 def _abs(p: str) -> Path:
@@ -206,4 +215,6 @@ __all__ = [
     "DEFAULT_USER_ID", "USER_ID_HEADER",
     # Secrets
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "GEMINI_API_KEY",
+    # Eval L3 Judge
+    "ARK_API_KEY", "ARK_BASE_URL", "DOUBAO_JUDGE_MODEL",
 ]

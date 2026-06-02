@@ -20,6 +20,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from server.domain.types import QueryPlan
+from server.indexing.brand_aliases import normalize_brand
 from server.tools.base import ToolResult
 
 
@@ -82,8 +83,11 @@ def update_session_state_after_turn(
     # ── 来自 plan ──
     if plan is not None:
         # 累积型:rejected_brands(用户除非显式撤回)
+        # normalize 一下,避免 set 同时存 "Nike" 和 "耐克"(Planner 后续看到混乱)
         if plan.hard_constraints.brand_exclude:
-            state.rejected_brands |= set(plan.hard_constraints.brand_exclude)
+            state.rejected_brands |= {
+                normalize_brand(b) for b in plan.hard_constraints.brand_exclude if b
+            }
         # 覆盖型:price_cap / topic
         state.mentioned_price_cap = plan.hard_constraints.price_max
         # topic fallback 链:text_query(信息最浓) → sub_category → category → None
