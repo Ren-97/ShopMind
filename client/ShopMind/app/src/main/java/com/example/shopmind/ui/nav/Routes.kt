@@ -2,6 +2,7 @@ package com.example.shopmind.ui.nav
 
 object Routes {
     const val CHAT = "chat"
+    const val PROFILE = "profile"
     const val CART = "cart"
     // 整车下单(聊天 CheckoutCard 路径);勾选下单走 checkout(skuIds) 带 query 参数
     const val CHECKOUT = "checkout"

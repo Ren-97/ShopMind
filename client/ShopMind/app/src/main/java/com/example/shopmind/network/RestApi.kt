@@ -104,6 +104,11 @@ class RestApi(
     suspend fun listUsers(): List<UserListItem> =
         json.decodeFromString(ListSerializer(UserListItem.serializer()), get("/users"))
 
+    suspend fun createUser(displayName: String): UserListItem {
+        val body = buildJsonObject { put("display_name", displayName) }
+        return json.decodeFromString(UserListItem.serializer(), post("/users", body.toString()))
+    }
+
     // ──────────────────────────────────────────────────────────
     // Chat history(B+)
     // ──────────────────────────────────────────────────────────

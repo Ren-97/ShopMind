@@ -10,6 +10,7 @@ import com.example.shopmind.ui.screens.CartScreen
 import com.example.shopmind.ui.screens.ChatScreen
 import com.example.shopmind.ui.screens.OrderConfirmScreen
 import com.example.shopmind.ui.screens.ProductDetailScreen
+import com.example.shopmind.ui.screens.ProfileScreen
 import com.example.shopmind.viewmodel.ChatViewModel
 
 @Composable
@@ -20,6 +21,9 @@ fun ShopMindNavGraph(
     NavHost(navController = navController, startDestination = Routes.CHAT) {
         composable(Routes.CHAT) {
             ChatScreen(navController = navController, vm = chatViewModel)
+        }
+        composable(Routes.PROFILE) {
+            ProfileScreen(navController = navController)
         }
         composable(
             route = Routes.PRODUCT_DETAIL,

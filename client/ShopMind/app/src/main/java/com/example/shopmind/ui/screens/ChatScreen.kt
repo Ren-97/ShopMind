@@ -14,7 +14,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.AlertDialog
@@ -26,6 +28,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -69,6 +72,7 @@ fun ChatScreen(
     var inputText by remember { mutableStateOf("") }
     var userMenuExpanded by remember { mutableStateOf(false) }
     var clearDialogOpen by remember { mutableStateOf(false) }
+    var newUserDialogOpen by remember { mutableStateOf(false) }
 
     // 从其他屏返回 ChatScreen 时刷新角标(可能在 Detail / Cart 屏改过 cart)
     LaunchedEffect(Unit) { vm.refreshCartCount() }
@@ -115,6 +119,17 @@ fun ChatScreen(
                             expanded = userMenuExpanded,
                             onDismissRequest = { userMenuExpanded = false },
                         ) {
+                            DropdownMenuItem(
+                                text = { Text("个人资料") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Person, contentDescription = null)
+                                },
+                                onClick = {
+                                    userMenuExpanded = false
+                                    navController.navigate(Routes.PROFILE)
+                                },
+                            )
+                            HorizontalDivider()
                             val users = state.availableUsers
                             if (users.isEmpty()) {
                                 DropdownMenuItem(
@@ -136,6 +151,17 @@ fun ChatScreen(
                                     )
                                 }
                             }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("新建用户") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Add, contentDescription = null)
+                                },
+                                onClick = {
+                                    userMenuExpanded = false
+                                    newUserDialogOpen = true
+                                },
+                            )
                         }
                     }
                 },
@@ -232,6 +258,34 @@ fun ChatScreen(
             },
             dismissButton = {
                 TextButton(onClick = { clearDialogOpen = false }) { Text("取消") }
+            },
+        )
+    }
+
+    if (newUserDialogOpen) {
+        var newName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { newUserDialogOpen = false },
+            title = { Text("新建用户") },
+            text = {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("昵称") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        newUserDialogOpen = false
+                        vm.createUser(newName)
+                    },
+                    enabled = newName.isNotBlank(),
+                ) { Text("创建") }
+            },
+            dismissButton = {
+                TextButton(onClick = { newUserDialogOpen = false }) { Text("取消") }
             },
         )
     }

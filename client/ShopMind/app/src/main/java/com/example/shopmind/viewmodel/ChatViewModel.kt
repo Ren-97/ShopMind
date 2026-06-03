@@ -10,6 +10,7 @@ import com.example.shopmind.domain.OrderCardData
 import com.example.shopmind.domain.ProductCardData
 import com.example.shopmind.domain.ProductDetail
 import com.example.shopmind.domain.SuggestionItem
+import com.example.shopmind.domain.UserListItem
 import com.example.shopmind.network.HttpClients
 import com.example.shopmind.network.RestApi
 import com.example.shopmind.network.SessionStore
@@ -106,12 +107,27 @@ class ChatViewModel @JvmOverloads constructor(
         val keepUsers = _state.value.availableUsers
         _state.value = ChatUiState(
             currentUserId = userId,
-            currentDisplayName = displayNameFor(userId),
+            currentDisplayName = displayNameFor(userId, keepUsers),
             sessionId = SessionStore.getOrCreate(getApplication(), userId),
             availableUsers = keepUsers,
         )
         refreshCartCount()
         loadHistory()
+    }
+
+    /** ➕ 新建空白用户:POST /users → 加进列表 → 切过去(落到空 profile / 空对话)。 */
+    fun createUser(displayName: String) {
+        val name = displayName.trim()
+        if (name.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val created = rest.createUser(name)
+                _state.update { it.copy(availableUsers = it.availableUsers + created) }
+                switchUser(created.userId)
+            } catch (e: Exception) {
+                onError("create_user_failed", e.message ?: "新建用户失败")
+            }
+        }
     }
 
     fun refreshCartCount() {
@@ -140,7 +156,7 @@ class ChatViewModel @JvmOverloads constructor(
     private fun loadUsers() {
         viewModelScope.launch {
             try {
-                val users = rest.listUsers().filter { it.userId.startsWith("demo_") }
+                val users = rest.listUsers().filter { !it.userId.startsWith("eval_") }
                 _state.update { it.copy(availableUsers = users) }
             } catch (e: Exception) {
                 // 静默
@@ -299,8 +315,12 @@ class ChatViewModel @JvmOverloads constructor(
             "demo_user_3" to "Charlie",
         )
 
-        private fun displayNameFor(userId: String): String =
-            DEMO_DISPLAY_NAMES[userId] ?: userId
+        private fun displayNameFor(
+            userId: String,
+            users: List<UserListItem> = emptyList(),
+        ): String =
+            users.find { it.userId == userId }?.displayName
+                ?: DEMO_DISPLAY_NAMES[userId] ?: userId
 
         /** ProductDetail → ProductCardData(历史卡片简化版,无 chips)。 */
         private fun productDetailToCardData(d: ProductDetail): ProductCardData =
