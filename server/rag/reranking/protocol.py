@@ -39,6 +39,8 @@ class RankedProduct(BaseModel):
     properties: dict[str, Any] = Field(default_factory=dict)
     # 离线 LLM 抽出的客观警示信号(可为 null = 无负面信号)
     caveats_text: str | None = None
+    # SKU 列表 — Agent 加购时按 properties(尺码/容量/颜色)反查 sku_id
+    skus: list[dict[str, Any]] = Field(default_factory=list)
 
     # ── 命中证据(原始 chunks,用于"根据用户评论..."类引用) ──
     matched_chunks: list[MatchedChunk] = Field(default_factory=list)

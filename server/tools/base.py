@@ -32,12 +32,19 @@ log = structlog.get_logger("shopmind.tools")
 # ──────────────────────────────────────────────────────────────────────
 @dataclass(slots=True)
 class AgentDeps:
-    """跨 tool 共享的可注入依赖(不含 user_id — user_id 是 per-turn 注入)。"""
+    """跨 tool 共享的可注入依赖(不含 user_id — user_id 是 per-turn 注入)。
+
+    `session_snapshot` / `user_profile` 是 **per-turn** 上下文:orchestrator 每轮用
+    `dataclasses.replace` 生成一个带这两项的临时副本传给 execute_tool(共享单例本身
+    不被改,并发安全)。search tool 透传给 Planner 做指代消解(id_lookup)+ profile 软偏好。
+    """
 
     session_factory: async_sessionmaker[AsyncSession]
     dispatcher: RetrievalDispatcher
     reranker: Reranker
     base_url: str  # 拼 image_url 用
+    session_snapshot: dict[str, Any] | None = None
+    user_profile: dict[str, Any] | None = None
 
 
 # ──────────────────────────────────────────────────────────────────────

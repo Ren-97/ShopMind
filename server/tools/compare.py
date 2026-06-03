@@ -72,11 +72,61 @@ def _highlight_out_of_stock(stocks: list[bool]) -> dict[str, Any] | None:
     return {"type": "warning", "indices": out_idx}
 
 
+# 商品级 properties 对比白名单(跨类目通用 + 类目专项)。
+# 黑名单字段 (`not_suitable_skin` / 容易过度负面) 永远不进。
+# 闭集 enum (suitable_skin / contains_alcohol / contains_fragrance) 已有专项 row 处理。
+_PROPERTY_ROW_SPEC: list[tuple[str, str]] = [
+    # (properties key, 中文 row label)
+    ("effects", "核心功效"),      # 通用 — 所有类目都有,对比的核心维度
+    ("scene", "适用场景"),        # 通用 — 所有类目都有
+    ("gender", "适用人群"),       # 服饰专项
+    ("age_group", "适用年龄"),    # 美妆专项
+]
+
+
+def _build_property_rows(products: list[Product]) -> list[dict[str, Any]]:
+    """从 properties 抽**商品级**对比维度(effects / scene / gender / age_group)。
+
+    与 SKU 维度(尺码/容量/颜色)的区别:这些是"商品本身的特性",用户对比时
+    关心的"该选 A 还是 B";SKU 维度是"选 A 之后选哪个规格",对比阶段无关。
+    全同字段省略;list 类型用 " / " 拼接。
+    """
+    rows: list[dict[str, Any]] = []
+    for key, label in _PROPERTY_ROW_SPEC:
+        values: list[str] = []
+        for p in products:
+            v = (p.properties or {}).get(key)
+            values.append(_serialize_property_value(v))
+        # 至少 1 个商品有值 + 不全同 → 入 row
+        non_empty = [v for v in values if v != "—"]
+        if len(non_empty) >= 1 and len(set(values)) > 1:
+            rows.append(
+                {
+                    "attr_label": label,
+                    "values": values,
+                    "highlight": None,
+                }
+            )
+    return rows
+
+
+def _serialize_property_value(v: Any) -> str:
+    if v is None:
+        return "—"
+    if isinstance(v, list):
+        items = [str(x) for x in v if x is not None and str(x).strip()]
+        return " / ".join(items) if items else "—"
+    return str(v) if str(v).strip() else "—"
+
+
 def _build_rows(products: list[Product]) -> list[dict[str, Any]]:
-    """根据多商品的 properties / 价格 / 库存自动选行。"""
+    """根据多商品的 properties / 价格 / 库存自动选行。
+
+    去冗余原则:全同字段直接省略(类目 / 库存全在售 / 品牌全同),只展示有对比价值的维度。
+    """
     rows: list[dict[str, Any]] = []
 
-    # 价格行(客观 winner)
+    # 价格行(几乎永远有差异,winner 标最低)
     prices = [float(p.base_price) for p in products]
     rows.append(
         {
@@ -86,24 +136,42 @@ def _build_rows(products: list[Product]) -> list[dict[str, Any]]:
         }
     )
 
-    # 库存行(客观 warning:缺货 = 不能下单)
-    stocks = [bool(p.in_stock) for p in products]
-    rows.append(
-        {
-            "attr_label": "库存",
-            "values": ["在售" if s else "缺货" for s in stocks],
-            "highlight": _highlight_out_of_stock(stocks),
-        }
-    )
+    # 品牌行(全同省略 — 同品牌对比时品牌不是差异点)
+    brands = [p.brand for p in products]
+    if len(set(brands)) > 1:
+        rows.append(
+            {
+                "attr_label": "品牌",
+                "values": brands,
+                "highlight": None,
+            }
+        )
 
-    # 类目行(主观,无 highlight)
-    rows.append(
-        {
-            "attr_label": "类目",
-            "values": [f"{p.category}/{p.sub_category}" for p in products],
-            "highlight": None,
-        }
-    )
+    # 库存行(全在售省略 — 99% 情况下都在售,展示就是冗余)
+    stocks = [bool(p.in_stock) for p in products]
+    if not all(stocks):  # 至少一个缺货才展示
+        rows.append(
+            {
+                "attr_label": "库存",
+                "values": ["在售" if s else "缺货" for s in stocks],
+                "highlight": _highlight_out_of_stock(stocks),
+            }
+        )
+
+    # 商品级关键属性行(effects / scene / gender / age_group)— 大厂对比表的核心维度
+    # SKU 维度(尺码/容量/颜色)是"可选项"不是"商品差异",不进对比表(用户进详情页再选)
+    rows.extend(_build_property_rows(products))
+
+    # 类目行(全同省略 — 同 sub_category 对比时类目无信息)
+    cats = [f"{p.category}/{p.sub_category}" for p in products]
+    if len(set(cats)) > 1:
+        rows.append(
+            {
+                "attr_label": "类目",
+                "values": cats,
+                "highlight": None,
+            }
+        )
 
     # 美妆专项:含酒精 / 含香精 / 适合肤质 — 只展示,不高亮(主观)
     if any((p.properties or {}).get("contains_alcohol") is not None for p in products):

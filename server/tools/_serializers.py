@@ -39,6 +39,33 @@ def _chunk_info(chunk: MatchedChunk) -> dict[str, Any]:
     return {"chunk_type": chunk.chunk_type, "text": _truncate(chunk.text)}
 
 
+def compute_sku_dimensions(skus: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """从 SKU 列表里提取"SKU 间真正有差异的属性维度"。
+
+    每个商品的 SKU properties 是开放词表(鞋有"尺码 / 鞋楦",精华有"容量",
+    手机有"颜色 / 存储"...),但很多 key 在所有 SKU 间是同一个值(商品级,如
+    "适用人群=男款"对所有 SKU 都是)。Agent 加购时只需要问"差异化维度"。
+
+    返回:`{key: [unique values 保序]}`,只含 SKU 间有 >=2 个不同值的 key。
+    """
+    if not skus:
+        return {}
+    # 收集每个 key 的所有 value(保序)
+    key_to_values: dict[str, list[Any]] = {}
+    for sku in skus:
+        props = sku.get("properties") or {}
+        if not isinstance(props, dict):
+            continue
+        for k, v in props.items():
+            if v is None:
+                continue
+            bucket = key_to_values.setdefault(k, [])
+            if v not in bucket:
+                bucket.append(v)
+    # 只保留 >=2 个不同值的 key(单值的是商品级,不是 SKU 级差异)
+    return {k: [str(v) for v in vs] for k, vs in key_to_values.items() if len(vs) >= 2}
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Product:LLM-facing payload(ProductSummary)
 # ──────────────────────────────────────────────────────────────────────
@@ -47,7 +74,12 @@ def product_summary_from_ranked(
     *,
     base_url: str,
 ) -> dict[str, Any]:
-    """RankedProduct(已经过 DB enrich)→ LLM payload(§4.6.7)。"""
+    """RankedProduct(已经过 DB enrich)→ LLM payload(§4.6.7)。
+
+    含 `skus[]` + `sku_dimensions` — Agent 加购时:
+    1. 看 `sku_dimensions` 知道**该问哪几个维度**(尺码/颜色/容量等),不必读 12 个 SKU 自己算
+    2. 用户答完后,在 `skus[]` 里按 properties 反查 sku_id 调 manage_cart
+    """
     return {
         "product_id": ranked.product_id,
         "title": ranked.title,
@@ -60,6 +92,8 @@ def product_summary_from_ranked(
         "is_active": True,  # RankedProduct 已经过 is_active=TRUE 过滤
         "properties": ranked.properties,  # L1 商家结构化(suitable_skin / contains_alcohol / ...)
         "caveats": ranked.caveats_text,  # L4
+        "skus": ranked.skus,  # SKU 列表(Agent 加购按 properties 反查 sku_id)
+        "sku_dimensions": compute_sku_dimensions(ranked.skus),  # SKU 间差异化维度(预计算)
         "matched_chunks": [_chunk_info(c) for c in ranked.matched_chunks],
         "relevance_score": ranked.relevance_score,
         "reason": ranked.reason,
@@ -97,6 +131,12 @@ def product_summary_from_db(
             }
             for s in product.skus
         ],
+        "sku_dimensions": compute_sku_dimensions(
+            [
+                {"sku_id": s.sku_id, "properties": dict(s.properties or {}), "price": s.price}
+                for s in product.skus
+            ]
+        ),
         "matched_chunks": [],
     }
 
@@ -307,6 +347,7 @@ __all__ = [
     "build_image_url",
     "cart_card",
     "checkout_card",
+    "compute_sku_dimensions",
     "order_card",
     "product_card",
     "product_summary_from_db",

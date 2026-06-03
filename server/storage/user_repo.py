@@ -218,6 +218,7 @@ class UserRepo:
         role: str,
         content: str,
         tool_calls: list[dict[str, Any]] | None = None,
+        card_refs: dict[str, Any] | None = None,
     ) -> ChatHistory:
         msg = ChatHistory(
             user_id=user_id,
@@ -225,9 +226,26 @@ class UserRepo:
             role=role,
             content=content,
             tool_calls=tool_calls,
+            card_refs=card_refs,
         )
         session.add(msg)
         return msg
+
+    @staticmethod
+    async def clear_chat_history(
+        session: AsyncSession,
+        user_id: str,
+        session_id: str | None = None,
+    ) -> int:
+        """删 chat_history 行。指定 session_id 只清该 session;不指定清这个 user 的所有。
+
+        客户端 🔄 清空对话按钮调本方法 → 真删 DB(不可恢复,跟 ChatGPT / 微信清空一致)。
+        """
+        stmt = delete(ChatHistory).where(ChatHistory.user_id == user_id)
+        if session_id is not None:
+            stmt = stmt.where(ChatHistory.session_id == session_id)
+        result = await session.execute(stmt)
+        return result.rowcount or 0
 
     @staticmethod
     async def list_messages(

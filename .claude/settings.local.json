@@ -31,7 +31,23 @@
       "Bash(Select-Object Name)",
       "PowerShell(Get-ChildItem -Path C:\\\\Users\\\\shuai\\\\Desktop\\\\ShopMind -Force | Where-Object { -not $_.PSIsContainer -or $_.Name -in 'scripts','tests','docs','server','data','dataset','.claude' } | Select-Object Mode, Name | Format-Table -AutoSize)",
       "Bash(python -X utf8 -c ' *)",
-      "Bash(del brands_tmp.txt)"
+      "Bash(del brands_tmp.txt)",
+      "Bash(curl -s \"http://localhost:8000/users\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"http://localhost:8000/users\")",
+      "Bash(curl -s \"http://localhost:8000/product/p_clothes_011\")",
+      "Bash(python -m json.tool)",
+      "Bash(grep -oE '\"skus\":\\\\[[^]]{0,200}')",
+      "Bash(curl -s -o /dev/null -w \"health=%{http_code}\\\\n\" \"http://localhost:8000/health\")",
+      "Bash(curl -s \"http://localhost:8000/readyz\")",
+      "Bash(adb devices *)",
+      "Bash(/c/Users/97082/AppData/Local/Android/Sdk/platform-tools/adb.exe devices *)",
+      "Bash(\"/c/Users/97082/AppData/Local/Android/Sdk/platform-tools/adb.exe\" logcat *)",
+      "Bash(\"/c/Program Files/Docker/Docker/resources/bin/docker.exe\" inspect shopmind-postgres --format '{{ range .Mounts }}{{ .Type }}: {{ .Source }} -> {{ .Destination }}{{\"\\\\n\"}}{{ end }}')",
+      "PowerShell($adb = \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\"; if \\(Test-Path $adb\\) { & $adb devices } else { \"adb not found at $adb\" })",
+      "PowerShell($adb = \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\"; & $adb devices; \"---boot状态---\"; & $adb shell getprop sys.boot_completed 2>&1)",
+      "PowerShell($adb = \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\"; & $adb kill-server; Start-Sleep -Seconds 2; & $adb start-server; Start-Sleep -Seconds 3; & $adb devices)",
+      "mcp__ide__getDiagnostics",
+      "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; Push-Location \"D:\\\\ShopMind\\\\client\\\\ShopMind\"; & .\\\\gradlew.bat :app:compileDebugKotlin --console=plain; $code = $LASTEXITCODE; Pop-Location; \"EXIT=$code\")"
     ]
   }
 }

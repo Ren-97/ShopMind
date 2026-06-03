@@ -40,13 +40,17 @@ router = APIRouter(prefix="/order", tags=["order"])
 # ──────────────────────────────────────────────────────────────
 class PlaceOrderBody(BaseModel):
     """OrderConfirmScreen 提交。地址三件套可选 — 不传则取 profile;
-    传了只用这次,**不**同步回 profile(改 profile 走 PATCH /profile)。"""
+    传了只用这次,**不**同步回 profile(改 profile 走 PATCH /profile)。
+
+    sku_ids:只下单购物车里的这些 sku_id(勾选下单);不传 = 整车下单。
+    Agent 走 start_checkout 始终整车,故聊天路径不传此字段。"""
 
     model_config = ConfigDict(extra="forbid")
 
     address: str | None = Field(default=None, min_length=1, max_length=500)
     recipient_name: str | None = Field(default=None, min_length=1, max_length=100)
     phone: str | None = Field(default=None, min_length=1, max_length=50)
+    sku_ids: list[str] | None = Field(default=None, min_length=1)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -73,6 +77,16 @@ async def place_order(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="购物车是空的",
             )
+
+        # 勾选下单:只保留选中的 sku_id;不传 sku_ids 则整车下单
+        if body.sku_ids is not None:
+            selected = set(body.sku_ids)
+            cart_items = [it for it in cart_items if it.sku_id in selected]
+            if not cart_items:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="选中的商品不在购物车里",
+                )
 
         profile = await UserRepo.get_profile(session, user_id)
         address = body.address or (profile.address if profile else None)

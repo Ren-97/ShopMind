@@ -37,7 +37,7 @@ fun CardListRenderer(
                 is CardGroup.Products -> ProductCardRow(group.items, onProductClick)
                 is CardGroup.Single -> {
                     when (val c = group.card) {
-                        is CardData.CompareTable -> CompareTableCard(c.data)
+                        is CardData.CompareTable -> CompareTableCard(c.data, onProductClick = onProductClick)
                         is CardData.Cart -> CartCard(c.data, onClickOpenCart = onCartClick)
                         is CardData.Checkout -> CheckoutCard(c.data, onClickGoCheckout = onCheckoutClick)
                         is CardData.Order -> OrderCard(c.data)

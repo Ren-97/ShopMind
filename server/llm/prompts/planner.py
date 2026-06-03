@@ -86,8 +86,12 @@ PLANNER_SYSTEM_PROMPT: str = """你是 ShopMind 的 Query Planner。你的唯一
 
 # 上下文使用
 - `[用户档案]`:跨 session 永久信息(肤质 / 性别 / 消费倾向 / 收货地址)。和 query 相关就用,否则忽略。
-- `[本轮 session 已沉淀]`:本 session 累积的 discussed_products / rejected_brands / mentioned_price_cap。**重要**:
-  - 用户用代词("刚才那款" / "这个" / "前面提到的" / "刚说的") **且** session 中 `discussed_products` 非空 → 选 `id_lookup`,把对应 ID 填到 `referenced_product_ids`(代词指向最近的 1-2 个 ID)。
+- `[本轮 session 已沉淀]`:本 session 累积的 shown_products / discussed_products / rejected_brands / mentioned_price_cap。**重要**:
+  - `shown_products` 每项是 `{id, title, brand}` —— 本 session 已经展示给用户的商品(last_shown 在前)。**这是指代消解的依据。**
+  - 用户**指代一个已展示过的商品**时 → 选 `id_lookup`,把命中的 id 填进 `referenced_product_ids`,`text_query` 留空。两种指代都算:
+    - **代词**("刚才那款" / "这个" / "前面提到的" / "刚说的" / "第二个" / "这几款") → 指向 `shown_products` 里对应位置的 1-N 个 id。
+    - **商品名 / 品牌 / 俗称**("小黑瓶" / "那个兰蔻的" / "买那双 HOKA") → 在 `shown_products` 的 title / brand 里**模糊匹配**出对应 id(俗称/简称也算,如"小黑瓶"匹配 title 含"小黑瓶"的那条)。
+  - **关键**:只要用户指的是 `shown_products` 里**已有**的商品,就走 id_lookup,**不要**把它当新搜索去抽 hard_constraints / text_query —— 那样俗称("小黑瓶")会因为约束抽错而检索落空。`shown_products` 为空或匹配不到时,才按普通新搜索处理。
   - 用户后续 query 没提价格但 session 里有 `mentioned_price_cap`,该 cap 一直生效(用户没说"价格涨上去")。
   - session 中的 `rejected_brands` 自动并入当前 plan 的 `brand_exclude`(去重)。
 - 最近对话:你能看到最近 N 轮原文;商品事实(价格 / 规格 / 库存)以 Catalog DB 为准,**不要从对话历史里读数字回填 plan**。

@@ -8,6 +8,8 @@
 字段语义:
 - discussed_products: 全局累积(本 session 所有展示/讨论过)
 - last_shown_products: 每轮覆盖(最近一轮)
+- product_index:      全局累积,product_id → {title, brand};供 Planner 把
+                      用户的商品名/俗称指代(如"小黑瓶")消解回 product_id 走 id_lookup
 - rejected_brands:    全局累积(用户拒绝过的)
 - mentioned_price_cap: 每轮覆盖(可 None)
 - current_topic:      每轮覆盖
@@ -31,13 +33,36 @@ class SessionState(BaseModel):
 
     discussed_products: set[str] = Field(default_factory=set)
     last_shown_products: list[str] = Field(default_factory=list)
+    product_index: dict[str, dict[str, str]] = Field(default_factory=dict)
     rejected_brands: set[str] = Field(default_factory=set)
     mentioned_price_cap: float | None = None
     current_topic: str | None = None
 
+    def _shown_products(self) -> list[dict[str, str]]:
+        """已展示商品的 {id, title, brand} 列表,last_shown 在前、其余 discussed 在后。
+
+        给 Planner 做"商品名/俗称 → product_id"指代消解用(id_lookup)。
+        product_index 里没记到的(理论上不该发生)只给 id。
+        """
+        ordered: list[str] = list(self.last_shown_products)
+        for pid in sorted(self.discussed_products):
+            if pid not in ordered:
+                ordered.append(pid)
+        out: list[dict[str, str]] = []
+        for pid in ordered:
+            entry: dict[str, str] = {"id": pid}
+            info = self.product_index.get(pid) or {}
+            if info.get("title"):
+                entry["title"] = info["title"]
+            if info.get("brand"):
+                entry["brand"] = info["brand"]
+            out.append(entry)
+        return out
+
     def render_for_planner(self) -> dict[str, Any]:
         """给 Planner 看的精简字典(不暴露内部对象)。"""
         return {
+            "shown_products": self._shown_products(),
             "discussed_products": sorted(self.discussed_products),
             "last_shown_products": list(self.last_shown_products),
             "rejected_brands": sorted(self.rejected_brands),
@@ -108,15 +133,35 @@ def update_session_state_after_turn(
             ids = [p["product_id"] for p in products if "product_id" in p]
             if ids:
                 state.discussed_products |= set(ids)
+                _index_products(state, products)
                 last_shown = ids  # 覆盖
         elif name == "compare_products":
             products = result.payload.get("products") or []
             ids = [p["product_id"] for p in products if "product_id" in p]
             state.discussed_products |= set(ids)
+            _index_products(state, products)
 
     if last_shown is not None:
         state.last_shown_products = last_shown
     return state
+
+
+def _index_products(state: SessionState, products: list[dict[str, Any]]) -> None:
+    """把 product payload 里的 title / brand 累积进 product_index(供指代消解)。
+
+    payload 不一定带 title(如单测只给 product_id)→ 缺啥跳啥,不覆盖已有值。
+    """
+    for p in products:
+        pid = p.get("product_id")
+        if not pid:
+            continue
+        info = dict(state.product_index.get(pid, {}))
+        if p.get("title"):
+            info["title"] = str(p["title"])
+        if p.get("brand"):
+            info["brand"] = str(p["brand"])
+        if info:
+            state.product_index[pid] = info
 
 
 __all__ = [

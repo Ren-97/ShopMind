@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from typing import Any, Literal
 
 import structlog
@@ -120,7 +121,15 @@ class Orchestrator:
     ) -> AsyncIterator[AgentEvent]:
         state = self._sessions.get(session_id)
         # context 段:profile + session_state(动态部分,不入 prompt cache)
-        extra_context = await self._build_extra_context(user_id, state)
+        extra_context, profile_dict, session_dict = await self._build_turn_context(
+            user_id, state
+        )
+        # per-turn deps 副本:把 profile / session 透传给 tool(search → Planner 指代消解)
+        turn_deps = replace(
+            self._deps,
+            session_snapshot=session_dict,
+            user_profile=profile_dict or None,
+        )
 
         # initial messages:历史 N 轮 + 当前 user query
         messages = await self._build_initial_messages(
@@ -166,7 +175,7 @@ class Orchestrator:
                 result = await execute_tool(
                     block,
                     user_id=user_id,
-                    deps=self._deps,
+                    deps=turn_deps,
                     registry=self._registry,
                 )
                 tool_results_for_round.append((block.name, result, block))
@@ -234,10 +243,15 @@ class Orchestrator:
         yield AgentEvent(type="done", data={"finish_reason": finish_reason})
 
     # ──────────────────────────────────────────────────────────────
-    async def _build_extra_context(
+    async def _build_turn_context(
         self, user_id: str, state: SessionState
-    ) -> str:
-        """profile + session_state 渲染成一段文本(给 Agent system 看)。"""
+    ) -> tuple[str, dict[str, Any], dict[str, Any]]:
+        """构造本轮上下文,一次性产出三样(避免重复查 profile):
+
+        - `extra_context`:profile + session_state 渲染成一段文本(给 Agent system 看)
+        - `profile_dict`:结构化 profile(经 turn_deps 透传给 search → Planner)
+        - `session_dict`:session_state.render_for_planner()(同上)
+        """
         async with self._deps.session_factory() as session:
             profile = await UserRepo.get_profile(session, user_id)
 
@@ -259,11 +273,13 @@ class Orchestrator:
                 if v is not None and v != {}
             }
 
+        session_dict = state.render_for_planner()
         ctx = {
             "user_profile": profile_dict,
-            "session_state": state.render_for_planner(),
+            "session_state": session_dict,
         }
-        return f"[上下文]\n{json.dumps(ctx, ensure_ascii=False)}"
+        extra_context = f"[上下文]\n{json.dumps(ctx, ensure_ascii=False)}"
+        return extra_context, profile_dict, session_dict
 
     async def _build_initial_messages(
         self,
@@ -298,11 +314,17 @@ class Orchestrator:
         assistant_text: str,
         tool_results: list[tuple[str, ToolResult]],
     ) -> None:
-        """落 chat_history(user + assistant 一对)。tool_calls 摘要存 JSON。"""
+        """落 chat_history(user + assistant 一对)。
+
+        - `tool_calls` 摘要存 JSON(observability 用)
+        - `card_refs` 存本轮 emit 的卡片商品 / 订单 ID 引用(B+:历史里渲染卡片用)
+          只记录 product / compare_table / order 三种;cart / checkout 是临时态不存
+        """
         tool_calls_summary: list[dict[str, Any]] = [
             {"name": name, "is_error": r.is_error}
             for name, r in tool_results
         ]
+        card_refs = self._collect_card_refs(tool_results)
         async with self._deps.session_factory() as session:
             await UserRepo.append_message(
                 session, user_id, session_id, role="user", content=user_query
@@ -314,8 +336,49 @@ class Orchestrator:
                 role="assistant",
                 content=assistant_text,
                 tool_calls=tool_calls_summary or None,
+                card_refs=card_refs,
             )
             await session.commit()
+
+    @staticmethod
+    def _collect_card_refs(
+        tool_results: list[tuple[str, ToolResult]],
+    ) -> dict[str, Any] | None:
+        """从本轮 tool_results 抽出商品/订单引用,V2 历史渲染时实时拉。
+
+        - product card → 加入 products[](按 emit 顺序保序)
+        - compare_table → 取 headers 的 product_ids 加入 compare[]
+        - order card → 取 order_id 单值
+        - cart / checkout / 其它 → 不存(临时态,历史里看的是当前)
+        """
+        products: list[str] = []
+        compare: list[str] = []
+        order_id: str | None = None
+        for _, tr in tool_results:
+            for card in tr.cards:
+                t = card.get("type")
+                d = card.get("data", {}) or {}
+                if t == "product":
+                    pid = d.get("product_id")
+                    if isinstance(pid, str) and pid:
+                        products.append(pid)
+                elif t == "compare_table":
+                    for h in d.get("headers") or []:
+                        pid = h.get("product_id") if isinstance(h, dict) else None
+                        if isinstance(pid, str) and pid:
+                            compare.append(pid)
+                elif t == "order":
+                    oid = d.get("order_id")
+                    if isinstance(oid, str) and oid:
+                        order_id = oid
+        refs: dict[str, Any] = {}
+        if products:
+            refs["products"] = products
+        if compare:
+            refs["compare"] = compare
+        if order_id:
+            refs["order"] = order_id
+        return refs or None
 
 
 __all__ = ["AgentEvent", "Orchestrator"]

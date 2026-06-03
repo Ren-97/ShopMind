@@ -61,7 +61,7 @@ SPARSE_MODEL_NAME: str = _env("SPARSE_MODEL_NAME", "Qdrant/bm25")  # fastembed B
 RETRIEVAL_DENSE_LIMIT: int = _env_int("RETRIEVAL_DENSE_LIMIT", 20)
 RETRIEVAL_SPARSE_LIMIT: int = _env_int("RETRIEVAL_SPARSE_LIMIT", 20)
 RETRIEVAL_RRF_LIMIT: int = _env_int("RETRIEVAL_RRF_LIMIT", 30)
-RETRIEVAL_PRODUCT_TOP_N: int = _env_int("RETRIEVAL_PRODUCT_TOP_N", 10)
+RETRIEVAL_PRODUCT_TOP_N: int = _env_int("RETRIEVAL_PRODUCT_TOP_N", 5)
 
 # ─────────────────────────────────────────────────────────────
 # Planner(§4.2)

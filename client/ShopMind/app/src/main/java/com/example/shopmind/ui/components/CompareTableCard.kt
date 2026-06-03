@@ -1,6 +1,7 @@
 package com.example.shopmind.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,6 +44,7 @@ import com.example.shopmind.domain.CompareTableData
 @Composable
 fun CompareTableCard(
     data: CompareTableData,
+    onProductClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
@@ -62,6 +64,7 @@ fun CompareTableCard(
                 headers = data.headers,
                 labelWidth = labelWidth,
                 cellWidth = cellWidth,
+                onProductClick = onProductClick,
             )
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             data.rows.forEach { row ->
@@ -80,6 +83,7 @@ private fun CompareHeaderRow(
     headers: List<CompareHeader>,
     labelWidth: androidx.compose.ui.unit.Dp,
     cellWidth: androidx.compose.ui.unit.Dp,
+    onProductClick: (String) -> Unit,
 ) {
     Row(
         modifier = Modifier.padding(horizontal = 8.dp),
@@ -90,7 +94,9 @@ private fun CompareHeaderRow(
             Column(
                 modifier = Modifier
                     .width(cellWidth)
-                    .padding(horizontal = 4.dp),
+                    .padding(horizontal = 4.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { onProductClick(h.productId) },
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {

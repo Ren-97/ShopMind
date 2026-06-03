@@ -3,6 +3,7 @@ package com.example.shopmind.viewmodel
 import com.example.shopmind.domain.CardData
 import com.example.shopmind.domain.ChatMessage
 import com.example.shopmind.domain.SuggestionItem
+import com.example.shopmind.domain.UserListItem
 
 /**
  * ChatScreen 状态(§4.7.7)。
@@ -24,5 +25,10 @@ data class ChatUiState(
     val isLoading: Boolean = false,
     val errorMsg: String? = null,
     val currentUserId: String = "",
+    val currentDisplayName: String = "",
     val sessionId: String = "",
+    /** 顶栏 🛒 角标。-1 = 未加载;0 = 空购物车;>0 = 件数。 */
+    val cartItemCount: Int = -1,
+    /** 顶栏下拉切换 user 用 — Chunk 11 接 GET /users。 */
+    val availableUsers: List<UserListItem> = emptyList(),
 )

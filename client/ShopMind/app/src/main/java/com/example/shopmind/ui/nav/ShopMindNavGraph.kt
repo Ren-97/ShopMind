@@ -10,25 +10,54 @@ import com.example.shopmind.ui.screens.CartScreen
 import com.example.shopmind.ui.screens.ChatScreen
 import com.example.shopmind.ui.screens.OrderConfirmScreen
 import com.example.shopmind.ui.screens.ProductDetailScreen
+import com.example.shopmind.viewmodel.ChatViewModel
 
 @Composable
-fun ShopMindNavGraph(navController: NavHostController) {
+fun ShopMindNavGraph(
+    navController: NavHostController,
+    chatViewModel: ChatViewModel,
+) {
     NavHost(navController = navController, startDestination = Routes.CHAT) {
         composable(Routes.CHAT) {
-            ChatScreen(navController)
+            ChatScreen(navController = navController, vm = chatViewModel)
         }
         composable(
             route = Routes.PRODUCT_DETAIL,
             arguments = listOf(navArgument(Routes.PRODUCT_ARG) { type = NavType.StringType }),
         ) { backStackEntry ->
             val productId = backStackEntry.arguments?.getString(Routes.PRODUCT_ARG).orEmpty()
-            ProductDetailScreen(navController = navController, productId = productId)
+            ProductDetailScreen(
+                navController = navController,
+                productId = productId,
+                onCartChanged = { chatViewModel.refreshCartCount() },
+            )
         }
         composable(Routes.CART) {
-            CartScreen(navController)
+            CartScreen(
+                navController = navController,
+                onCartChanged = { chatViewModel.refreshCartCount() },
+            )
         }
-        composable(Routes.CHECKOUT) {
-            OrderConfirmScreen(navController)
+        composable(
+            route = Routes.CHECKOUT_ROUTE,
+            arguments = listOf(
+                navArgument(Routes.CHECKOUT_ARG) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) { backStackEntry ->
+            val skuIds = backStackEntry.arguments
+                ?.getString(Routes.CHECKOUT_ARG)
+                ?.split(",")
+                ?.filter { it.isNotBlank() }
+                .orEmpty()
+            OrderConfirmScreen(
+                navController = navController,
+                chatViewModel = chatViewModel,
+                selectedSkuIds = skuIds,
+            )
         }
     }
 }

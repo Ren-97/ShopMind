@@ -101,6 +101,14 @@ def _to_ranked_product(
         image_path=product.image_path,
         properties=dict(product.properties or {}),
         caveats_text=caveats_text,
+        skus=[
+            {
+                "sku_id": s.sku_id,
+                "properties": dict(s.properties or {}),
+                "price": float(s.price),
+            }
+            for s in product.skus
+        ],
         matched_chunks=list(hit.matched_chunks),
     )
 

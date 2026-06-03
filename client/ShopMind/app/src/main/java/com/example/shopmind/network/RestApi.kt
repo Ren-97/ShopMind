@@ -2,6 +2,7 @@ package com.example.shopmind.network
 
 import com.example.shopmind.domain.CardData
 import com.example.shopmind.domain.CartCardData
+import com.example.shopmind.domain.HistoryMessage
 import com.example.shopmind.domain.OrderCardData
 import com.example.shopmind.domain.PlaceOrderRequest
 import com.example.shopmind.domain.ProductDetail
@@ -102,6 +103,23 @@ class RestApi(
 
     suspend fun listUsers(): List<UserListItem> =
         json.decodeFromString(ListSerializer(UserListItem.serializer()), get("/users"))
+
+    // ──────────────────────────────────────────────────────────
+    // Chat history(B+)
+    // ──────────────────────────────────────────────────────────
+    suspend fun getHistory(): List<HistoryMessage> {
+        val raw = get("/chat/history")
+        val obj = json.parseToJsonElement(raw).jsonObject
+        val arr = obj["messages"]?.jsonArray ?: return emptyList()
+        return arr.map { json.decodeFromJsonElement(HistoryMessage.serializer(), it) }
+    }
+
+    /** 🔄 清空对话 — DELETE /chat/history。返回 server 报告的删除行数。 */
+    suspend fun clearHistory(): Int {
+        val raw = delete("/chat/history")
+        val obj = json.parseToJsonElement(raw).jsonObject
+        return (obj["deleted"]?.toString()?.toIntOrNull()) ?: 0
+    }
 
     // ──────────────────────────────────────────────────────────
     // 共享:HTTP verbs + unwrap

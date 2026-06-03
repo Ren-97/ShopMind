@@ -15,12 +15,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,6 +35,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -62,6 +67,11 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val snackbarHost = remember { SnackbarHostState() }
     var inputText by remember { mutableStateOf("") }
+    var userMenuExpanded by remember { mutableStateOf(false) }
+    var clearDialogOpen by remember { mutableStateOf(false) }
+
+    // 从其他屏返回 ChatScreen 时刷新角标(可能在 Detail / Cart 屏改过 cart)
+    LaunchedEffect(Unit) { vm.refreshCartCount() }
 
     LaunchedEffect(state.messages.size, state.streamingText.length, state.isLoading) {
         val targetIndex = state.messages.size + (if (state.isLoading) 1 else 0) - 1
@@ -75,7 +85,7 @@ fun ChatScreen(
         }
     }
 
-    val cartCount = 0 // Chunk 11 接真实 cart count
+    val cartCount = state.cartItemCount.coerceAtLeast(0)
 
     // ── 卡片点击回调(共享给已完成消息和 streaming 消息)──
     val onProductClick: (String) -> Unit = { id ->
@@ -93,16 +103,52 @@ fun ChatScreen(
             CenterAlignedTopAppBar(
                 title = { Text("ShopMind") },
                 navigationIcon = {
-                    AssistChip(
-                        onClick = { /* Chunk 11 弹下拉菜单 */ },
-                        label = { Text(state.currentUserId.ifEmpty { "Alice" }) },
-                        trailingIcon = {
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = "切换用户")
-                        },
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
+                    Box(modifier = Modifier.padding(start = 8.dp)) {
+                        AssistChip(
+                            onClick = { userMenuExpanded = true },
+                            label = { Text(state.currentDisplayName.ifEmpty { "Alice" }) },
+                            trailingIcon = {
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = "切换用户")
+                            },
+                        )
+                        DropdownMenu(
+                            expanded = userMenuExpanded,
+                            onDismissRequest = { userMenuExpanded = false },
+                        ) {
+                            val users = state.availableUsers
+                            if (users.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("(暂无用户列表)") },
+                                    enabled = false,
+                                    onClick = {},
+                                )
+                            } else {
+                                users.forEach { u ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            val tick = if (u.userId == state.currentUserId) "✓ " else "  "
+                                            Text("$tick${u.displayName}")
+                                        },
+                                        onClick = {
+                                            userMenuExpanded = false
+                                            vm.switchUser(u.userId)
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { clearDialogOpen = true },
+                        enabled = state.messages.isNotEmpty(),
+                    ) {
+                        Icon(
+                            Icons.Default.RestartAlt,
+                            contentDescription = "清空对话",
+                        )
+                    }
                     BadgedBox(
                         badge = { if (cartCount > 0) Badge { Text(cartCount.toString()) } },
                         modifier = Modifier.padding(end = 12.dp),
@@ -169,6 +215,25 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    if (clearDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { clearDialogOpen = false },
+            title = { Text("清空对话记录?") },
+            text = { Text("清空后无法恢复。购物车 / 订单 / 个人资料不会受影响。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        clearDialogOpen = false
+                        vm.clearHistory()
+                    },
+                ) { Text("清空") }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearDialogOpen = false }) { Text("取消") }
+            },
+        )
     }
 }
 

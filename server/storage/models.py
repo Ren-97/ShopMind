@@ -293,6 +293,9 @@ class ChatHistory(Base):
     role: Mapped[str] = mapped_column(String, nullable=False)  # user/assistant/tool
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tool_calls: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    # Card 引用(B+:历史里渲染卡片用 — 不存完整 JSON 快照,只存 ID,实时拉最新数据)
+    # 结构:{"products": ["p_x", ...], "compare": ["p_a", ...], "order": "ord-xxx"}
+    card_refs: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.current_timestamp(), nullable=False
     )

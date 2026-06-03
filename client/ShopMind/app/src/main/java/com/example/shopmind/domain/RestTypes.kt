@@ -46,11 +46,12 @@ data class FaqDetail(
 
 @Serializable
 data class ReviewDetail(
-    @SerialName("review_id") val reviewId: String,
+    @SerialName("review_id") val reviewId: Long,
     val nickname: String? = null,
     val rating: Int? = null,
     val content: String,
-    val sentiment: String? = null,
+    /** 情感分 ∈ [-1.0, 1.0],离线 LLM 抽出;负数 = 负面评价。 */
+    val sentiment: Double? = null,
     val aspects: List<String> = emptyList(),
 )
 
@@ -79,4 +80,28 @@ data class PlaceOrderRequest(
     val address: String? = null,
     @SerialName("recipient_name") val recipientName: String? = null,
     val phone: String? = null,
+    // 只下单这些 sku_id(勾选下单);null = 整车下单
+    @SerialName("sku_ids") val skuIds: List<String>? = null,
+)
+
+// ──────────────────────────────────────────────────────────────
+// B+ 对话历史(GET /chat/history)
+// 后端只存引用,客户端拿 product_id / order_id 实时拉最新数据
+// ──────────────────────────────────────────────────────────────
+
+@Serializable
+data class HistoryCardRefs(
+    val products: List<String>? = null,
+    val compare: List<String>? = null,
+    val order: String? = null,
+)
+
+@Serializable
+data class HistoryMessage(
+    @SerialName("msg_id") val msgId: Long,
+    @SerialName("session_id") val sessionId: String,
+    val role: String,
+    val content: String,
+    @SerialName("card_refs") val cardRefs: HistoryCardRefs? = null,
+    @SerialName("created_at") val createdAt: String? = null,
 )
