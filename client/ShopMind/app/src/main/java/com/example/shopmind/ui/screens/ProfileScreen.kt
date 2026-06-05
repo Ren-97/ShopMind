@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -26,12 +27,17 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -248,48 +254,54 @@ fun ProfileScreen(navController: NavController) {
 
                 HorizontalDivider()
 
-                // ── ShopMind 记住的偏好(标签,只能删不能改)──
-                SectionTitle("ShopMind 记住的偏好")
-                Text(
-                    "这些是从对话中自动学到的。不准确可以删除,删后在对话里重新告诉它即可;不能手动编辑。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                // ── 为你记住的(标签,只能删不能改;说明藏进 ⓘ)──
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionTitle("为你记住的")
+                    val tipState = rememberTooltipState(isPersistent = true)
+                    TooltipBox(
+                        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
+                            TooltipAnchorPosition.Above,
+                        ),
+                        tooltip = {
+                            PlainTooltip {
+                                Text("聊天时我会悄悄记下你的偏好,让推荐更懂你~ 不准的点 ✕ 删掉就好。")
+                            }
+                        },
+                        state = tipState,
+                    ) {
+                        IconButton(onClick = { scope.launch { tipState.show() } }) {
+                            Icon(
+                                Icons.Outlined.Info,
+                                contentDescription = "说明",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
 
                 val prefs = profile?.preferences.orEmpty()
                 val tier = profile?.consumptionTier
                 if (tier.isNullOrBlank() && prefs.isEmpty()) {
                     Text(
-                        "还没有学到任何偏好。试着在对话里说\"我是敏感肌\"或\"我从来不买日系\"。",
+                        "还没记住什么呢,多聊几句吧~",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        if (!tier.isNullOrBlank()) {
-                            DeletableChip(
-                                text = "消费档位:$tier",
-                                onDelete = {
-                                    deleteTag(
-                                        buildJsonObject { put("consumption_tier", JsonNull) }.toString()
-                                    )
-                                },
+                    if (!tier.isNullOrBlank()) {
+                        PrefGroup(label = "消费档位", values = listOf(tier)) {
+                            deleteTag(
+                                buildJsonObject { put("consumption_tier", JsonNull) }.toString()
                             )
                         }
-                        prefs.forEach { (key, value) ->
-                            val label = PREF_LABELS[key] ?: key
-                            val items = jsonElementToStrings(value)
+                    }
+                    prefs.forEach { (key, value) ->
+                        val items = jsonElementToStrings(value)
+                        if (items.isNotEmpty()) {
                             val isList = value is JsonArray
-                            items.forEach { item ->
-                                DeletableChip(
-                                    text = "$label:$item",
-                                    onDelete = {
-                                        deleteTag(buildPrefDeleteBody(key, item, isList, items))
-                                    },
-                                )
+                            PrefGroup(label = PREF_LABELS[key] ?: key, values = items) { item ->
+                                deleteTag(buildPrefDeleteBody(key, item, isList, items))
                             }
                         }
                     }
@@ -320,6 +332,26 @@ private fun NumberField(value: String, onChange: (String) -> Unit, label: String
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PrefGroup(label: String, values: List<String>, onDelete: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            values.forEach { v ->
+                DeletableChip(text = v, onDelete = { onDelete(v) })
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DeletableChip(text: String, onDelete: () -> Unit) {
@@ -339,16 +371,16 @@ private fun DeletableChip(text: String, onDelete: () -> Unit) {
 
 private val PREF_LABELS: Map<String, String> = mapOf(
     "skin_type" to "肤质",
-    "skin_concerns" to "护肤诉求",
-    "fragrance_pref" to "香味偏好",
-    "brand_prefer" to "偏好品牌",
-    "brand_exclude" to "排除品牌",
-    "usage" to "用途",
-    "os_pref" to "系统偏好",
-    "clothing_size" to "服装尺码",
+    "skin_concerns" to "护肤需求",
+    "fragrance_pref" to "香味",
+    "brand_prefer" to "喜欢的品牌",
+    "brand_exclude" to "不想要的品牌",
+    "usage" to "常用场景",
+    "os_pref" to "系统",
+    "clothing_size" to "衣服尺码",
     "shoe_size" to "鞋码",
-    "style_pref" to "风格偏好",
-    "dietary_restrictions" to "饮食禁忌",
+    "style_pref" to "风格",
+    "dietary_restrictions" to "饮食",
 )
 
 private fun jsonElementToStrings(el: JsonElement): List<String> = when (el) {

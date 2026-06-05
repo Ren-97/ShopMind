@@ -222,6 +222,31 @@ def product_card(product_payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def sku_selector_card(product: Product, *, base_url: str) -> dict[str, Any]:
+    """sku_selector card —— 多规格商品加购时,客户端原地点选规格的卡片。
+
+    自带变体矩阵(skus + 预算好的 dimensions),客户端按维度渲染可点胶囊,
+    本地 findMatchingSku 反查 sku_id → POST /cart。Agent 不参与 SKU 消歧。
+    只带选规格必需的几行变体,营销文案/评论/FAQ/caveats 等重字段不进卡片。
+    """
+    skus = [
+        {"sku_id": s.sku_id, "properties": dict(s.properties or {}), "price": s.price}
+        for s in product.skus
+    ]
+    return {
+        "type": "sku_selector",
+        "data": {
+            "product_id": product.product_id,
+            "title": product.title,
+            "image_url": build_image_url(product.image_path, base_url=base_url),
+            "base_price": product.base_price,
+            "in_stock": product.in_stock,
+            "dimensions": compute_sku_dimensions(skus),
+            "skus": skus,
+        },
+    }
+
+
 def cart_card(
     cart_items: list[CartItem],
     *,
@@ -350,6 +375,7 @@ __all__ = [
     "compute_sku_dimensions",
     "order_card",
     "product_card",
+    "sku_selector_card",
     "product_summary_from_db",
     "product_summary_from_ranked",
 ]

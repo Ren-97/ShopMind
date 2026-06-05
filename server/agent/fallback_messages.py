@@ -17,7 +17,7 @@ FALLBACK_MESSAGES: dict[str, str] = {
     "tool_unavailable": "{tool_name} 暂时不可用,我换个方式帮你。",
     "out_of_stock": "{product_title} 暂时缺货,要不要看看类似的?",
     "off_shelf": "{product_title} 已下架,这里有几款相似的可以参考。",
-    "address_missing": "下单需要地址,可以告诉我寄到哪里吗?",
+    "address_missing": "下单需要收件人、电话和地址,可以告诉我吗?",
 }
 
 

@@ -67,7 +67,7 @@ async def place_order(
     """真下单。items 取购物车全部,地址三件套优先用 body,缺省回退 profile。
 
     异常:
-    - 422:地址缺失(profile 没填且 body 也没传)
+    - 422:收件人 / 电话 / 地址 任一缺失(profile 没填且 body 也没传)
     - 409:购物车空 / 商品下架 / 缺货
     """
     async with session_factory() as session:
@@ -90,15 +90,24 @@ async def place_order(
 
         profile = await UserRepo.get_profile(session, user_id)
         address = body.address or (profile.address if profile else None)
-        if not address:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="收货地址缺失",
-            )
         recipient_name = body.recipient_name or (
             profile.recipient_name if profile else None
         )
         phone = body.phone or (profile.phone if profile else None)
+        missing = [
+            label
+            for value, label in (
+                (recipient_name, "收件人"),
+                (phone, "联系电话"),
+                (address, "收货地址"),
+            )
+            if not value
+        ]
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{'、'.join(missing)}缺失",
+            )
 
         # 拼快照 + 库存预检(再做一次,防止 checkout 后到下单期间下架)
         sku_ids = [it.sku_id for it in cart_items]

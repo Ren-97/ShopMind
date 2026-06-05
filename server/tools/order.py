@@ -58,8 +58,22 @@ class StartCheckoutTool(Tool):
 
             profile = await UserRepo.get_profile(session, user_id)
             address = profile.address if profile else None
-            if not address:
-                raise ToolError("还没填收货地址 — 请告诉我寄到哪里,或者去个人资料页填")
+            recipient_name = profile.recipient_name if profile else None
+            phone = profile.phone if profile else None
+            missing = [
+                label
+                for value, label in (
+                    (recipient_name, "收件人"),
+                    (phone, "联系电话"),
+                    (address, "收货地址"),
+                )
+                if not value
+            ]
+            if missing:
+                raise ToolError(
+                    f"还差{'、'.join(missing)} — 告诉我就行(我帮你记到资料里),"
+                    "或者去个人资料页补全"
+                )
 
             sku_ids = [it.sku_id for it in cart_items]
             sku_to_product = await CatalogRepo.list_products_by_sku_ids(
@@ -93,8 +107,8 @@ class StartCheckoutTool(Tool):
                 cart_items,
                 sku_to_product=sku_to_product,
                 address=address,
-                recipient_name=profile.recipient_name if profile else None,
-                phone=profile.phone if profile else None,
+                recipient_name=recipient_name,
+                phone=phone,
                 base_url=deps.base_url,
             )
 

@@ -2,6 +2,7 @@ package com.example.shopmind.network
 
 import com.example.shopmind.domain.CardData
 import com.example.shopmind.domain.CartCardData
+import com.example.shopmind.domain.CatalogFacets
 import com.example.shopmind.domain.HistoryMessage
 import com.example.shopmind.domain.OrderCardData
 import com.example.shopmind.domain.PlaceOrderRequest
@@ -97,6 +98,9 @@ class RestApi(
     // ──────────────────────────────────────────────────────────
     suspend fun getProfile(): ProfileResponse =
         json.decodeFromString(ProfileResponse.serializer(), get("/profile"))
+
+    suspend fun getFacets(): CatalogFacets =
+        json.decodeFromString(CatalogFacets.serializer(), get("/catalog/facets"))
 
     suspend fun patchProfile(patchBody: String): ProfileResponse =
         json.decodeFromString(ProfileResponse.serializer(), patch("/profile", patchBody))

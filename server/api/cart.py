@@ -55,6 +55,9 @@ async def _snapshot_cart(
 ) -> dict[str, Any]:
     from server import config as _config
 
+    # session autoflush=False(db.py):先 flush 让本请求里刚写的 cart 改动可见,
+    # 否则 list_cart 读到的是改动前的旧快照(GET 无 pending 写 → flush 是 no-op)。
+    await session.flush()
     items = await UserRepo.list_cart(session, user_id)
     sku_ids = [it.sku_id for it in items]
     sku_to_product = await CatalogRepo.list_products_by_sku_ids(

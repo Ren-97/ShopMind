@@ -24,6 +24,10 @@ data class ChatUiState(
     val toolCallHint: String? = null,
     val isLoading: Boolean = false,
     val errorMsg: String? = null,
+    /** 一次性轻提示(如"购物车已更新"),Snackbar 显示后清掉。 */
+    val toastMsg: String? = null,
+    /** 空状态欢迎区的示例 chip:profile 有信号则个性化,否则静态四条。 */
+    val starterChips: List<String> = emptyList(),
     val currentUserId: String = "",
     val currentDisplayName: String = "",
     val sessionId: String = "",

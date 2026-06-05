@@ -3,10 +3,14 @@ package com.example.shopmind.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -48,6 +52,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
@@ -55,6 +61,7 @@ import com.example.shopmind.domain.CardData
 import com.example.shopmind.domain.ChatMessage
 import com.example.shopmind.domain.SuggestionItem
 import com.example.shopmind.ui.components.CardListRenderer
+import com.example.shopmind.ui.components.rendersBelowText
 import com.example.shopmind.ui.components.SuggestionChips
 import com.example.shopmind.ui.components.ThinkingBubble
 import com.example.shopmind.ui.nav.Routes
@@ -74,8 +81,11 @@ fun ChatScreen(
     var clearDialogOpen by remember { mutableStateOf(false) }
     var newUserDialogOpen by remember { mutableStateOf(false) }
 
-    // 从其他屏返回 ChatScreen 时刷新角标(可能在 Detail / Cart 屏改过 cart)
-    LaunchedEffect(Unit) { vm.refreshCartCount() }
+    // 从其他屏返回 ChatScreen 时刷新角标 + 示例 chip(可能在 Detail/Cart 改过 cart、在 Profile 改过偏好)
+    LaunchedEffect(Unit) {
+        vm.refreshCartCount()
+        vm.refreshStarterChips()
+    }
 
     LaunchedEffect(state.messages.size, state.streamingText.length, state.isLoading) {
         val targetIndex = state.messages.size + (if (state.isLoading) 1 else 0) - 1
@@ -89,6 +99,13 @@ fun ChatScreen(
         }
     }
 
+    LaunchedEffect(state.toastMsg) {
+        state.toastMsg?.let {
+            snackbarHost.showSnackbar(it)
+            vm.consumeToast()
+        }
+    }
+
     val cartCount = state.cartItemCount.coerceAtLeast(0)
 
     // ── 卡片点击回调(共享给已完成消息和 streaming 消息)──
@@ -97,6 +114,7 @@ fun ChatScreen(
     }
     val onCartClick: () -> Unit = { navController.navigate(Routes.CART) }
     val onCheckoutClick: () -> Unit = { navController.navigate(Routes.CHECKOUT) }
+    val onSkuAdd: (String, String) -> Unit = { skuId, title -> vm.addSkuFromSelector(skuId, title) }
     val onSuggestionClick: (SuggestionItem) -> Unit = { item ->
         // V1:所有 suggestion 都当消息发出去(包括"去结算"也由 Agent 处理路由判断)
         vm.sendMessage(item.query)
@@ -200,6 +218,16 @@ fun ChatScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHost) },
     ) { innerPadding ->
+        if (state.messages.isEmpty() && !state.isLoading) {
+            WelcomeEmptyState(
+                chips = state.starterChips,
+                onChipClick = { vm.sendMessage(it) },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+            )
+            return@Scaffold
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -220,6 +248,7 @@ fun ChatScreen(
                         onProductClick = onProductClick,
                         onCartClick = onCartClick,
                         onCheckoutClick = onCheckoutClick,
+                        onSkuAdd = onSkuAdd,
                         onSuggestionClick = onSuggestionClick,
                     )
                 }
@@ -236,6 +265,7 @@ fun ChatScreen(
                         onProductClick = onProductClick,
                         onCartClick = onCartClick,
                         onCheckoutClick = onCheckoutClick,
+                        onSkuAdd = onSkuAdd,
                         onSuggestionClick = onSuggestionClick,
                     )
                 }
@@ -292,6 +322,45 @@ fun ChatScreen(
 }
 
 // ──────────────────────────────────────────────────────────────
+// 空状态欢迎区(无消息时显示;发出第一条即消失)
+// ──────────────────────────────────────────────────────────────
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun WelcomeEmptyState(
+    chips: List<String>,
+    onChipClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "嗨,我是 ShopMind 👋",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "想买什么、纠结哪个,都可以问我",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(20.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            chips.forEach { q ->
+                AssistChip(onClick = { onChipClick(q) }, label = { Text(q) })
+            }
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────
 // Bubbles
 // ──────────────────────────────────────────────────────────────
 @Composable
@@ -324,6 +393,7 @@ private fun AssistantBubble(
     onProductClick: (String) -> Unit,
     onCartClick: () -> Unit,
     onCheckoutClick: () -> Unit,
+    onSkuAdd: (skuId: String, title: String) -> Unit,
     onSuggestionClick: (SuggestionItem) -> Unit,
     showSpinnerIfNothing: Boolean = false,
 ) {
@@ -338,18 +408,21 @@ private fun AssistantBubble(
         }
         if (toolCallHint != null) {
             Text(
-                "🔧 $toolCallHint",
+                toolCallHint,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp),
             )
         }
-        if (cards.isNotEmpty()) {
+        val cardsAbove = cards.filterNot { it.rendersBelowText() }
+        val cardsBelow = cards.filter { it.rendersBelowText() }
+        if (cardsAbove.isNotEmpty()) {
             CardListRenderer(
-                cards = cards,
+                cards = cardsAbove,
                 onProductClick = onProductClick,
                 onCartClick = onCartClick,
                 onCheckoutClick = onCheckoutClick,
+                onSkuAdd = onSkuAdd,
                 modifier = Modifier.padding(end = 12.dp),
             )
         }
@@ -381,6 +454,16 @@ private fun AssistantBubble(
                     }
                 }
             }
+        }
+        if (cardsBelow.isNotEmpty()) {
+            CardListRenderer(
+                cards = cardsBelow,
+                onProductClick = onProductClick,
+                onCartClick = onCartClick,
+                onCheckoutClick = onCheckoutClick,
+                onSkuAdd = onSkuAdd,
+                modifier = Modifier.padding(end = 12.dp),
+            )
         }
         if (suggestions.isNotEmpty()) {
             SuggestionChips(

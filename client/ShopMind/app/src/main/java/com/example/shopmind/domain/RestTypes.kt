@@ -69,6 +69,25 @@ data class ProfileResponse(
     val preferences: Map<String, JsonElement> = emptyMap(),
 )
 
+/**
+ * GET /catalog/facets —— 库存感知的 chip 候选源。
+ * 每个 category 是库里"在售有货"商品聚合出的真实词表,starter chip 只从这里填。
+ */
+@Serializable
+data class CatalogFacets(
+    val categories: List<CategoryFacet> = emptyList(),
+)
+
+@Serializable
+data class CategoryFacet(
+    val category: String,
+    @SerialName("sub_categories") val subCategories: List<String> = emptyList(),
+    val brands: List<String> = emptyList(),
+    @SerialName("price_min") val priceMin: Double = 0.0,
+    @SerialName("price_max") val priceMax: Double = 0.0,
+    @SerialName("product_count") val productCount: Int = 0,
+)
+
 @Serializable
 data class UserListItem(
     @SerialName("user_id") val userId: String,

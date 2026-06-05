@@ -34,6 +34,7 @@ from server.agent.session_state import (
 )
 from server.domain.types import QueryPlan
 from server.llm.agent_call import StreamChunk, stream_agent_turn
+from server.storage.catalog_repo import CatalogRepo
 from server.storage.user_repo import UserRepo
 from server.tools.base import (
     AgentDeps,
@@ -78,6 +79,8 @@ class Orchestrator:
         self._registry = tool_registry
         self._tool_specs = tool_specs_for_anthropic(tool_registry)
         self._sessions = session_store
+        # 本进程内已从 DB 重建过中期记忆的 session(每进程每 session 只 rehydrate 一次)
+        self._hydrated: set[str] = set()
 
     async def handle_user_turn(
         self,
@@ -120,6 +123,12 @@ class Orchestrator:
         session_id: str,
     ) -> AsyncIterator[AgentEvent]:
         state = self._sessions.get(session_id)
+        # 进程重启会清空内存中期记忆,但客户端是持久 session_id(重开 app 不变)。
+        # 首次见到某 session 时,从持久化的 chat_history.card_refs 把"展示过的商品 + id"
+        # 重建回内存,否则重启后指代("就买蒙牛的"/"小黑瓶")会因 product_index 为空而断。
+        await self._ensure_session_hydrated(
+            user_id=user_id, session_id=session_id, state=state
+        )
         # context 段:profile + session_state(动态部分,不入 prompt cache)
         extra_context, profile_dict, session_dict = await self._build_turn_context(
             user_id, state
@@ -243,6 +252,61 @@ class Orchestrator:
         yield AgentEvent(type="done", data={"finish_reason": finish_reason})
 
     # ──────────────────────────────────────────────────────────────
+    async def _ensure_session_hydrated(
+        self, *, user_id: str, session_id: str, state: SessionState
+    ) -> None:
+        """进程内首次见到某 session 时,从持久化历史重建中期记忆(product_index 等)。
+
+        中期记忆是进程内存(SessionStateStore 不持久化),进程重启/reload 即丢;但
+        chat_history.card_refs 持久化了每轮展示的 product_id。这里遍历它重建:
+        discussed_products(全量并集)/ last_shown_products(最近一轮)/ product_index
+        (id→title/brand,供 Planner 指代消解)。每进程每 session 只跑一次。
+        """
+        if session_id in self._hydrated:
+            return
+        self._hydrated.add(session_id)
+        # 本进程内已积累过状态(非重启场景)→ 不覆盖
+        if state.discussed_products or state.last_shown_products:
+            return
+
+        async with self._deps.session_factory() as session:
+            history = await UserRepo.list_recent_turns(
+                session, user_id, session_id, n_turns=config.AGENT_RECENT_TURNS * 2
+            )
+            discussed: set[str] = set()
+            last_shown: list[str] = []
+            for m in history:  # 时间正序
+                refs = m.card_refs or {}
+                products = list(refs.get("products") or [])
+                compare = list(refs.get("compare") or [])
+                ids = products + compare
+                if not ids:
+                    continue
+                discussed |= set(ids)
+                last_shown = products or compare  # 覆盖:保留最近一轮展示的
+            if not discussed:
+                return
+            indexed = await CatalogRepo.list_products_by_ids(
+                session, sorted(discussed), include_inactive=True
+            )
+
+        state.discussed_products |= discussed
+        state.last_shown_products = last_shown
+        for p in indexed:
+            info: dict[str, str] = {}
+            if p.title:
+                info["title"] = p.title
+            if p.brand:
+                info["brand"] = p.brand
+            if info:
+                state.product_index[p.product_id] = info
+        log.info(
+            "session_rehydrated",
+            session_id=session_id,
+            n_discussed=len(discussed),
+            n_last_shown=len(last_shown),
+        )
+
     async def _build_turn_context(
         self, user_id: str, state: SessionState
     ) -> tuple[str, dict[str, Any], dict[str, Any]]:

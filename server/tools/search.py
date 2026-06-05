@@ -24,7 +24,7 @@ from typing import Any, ClassVar
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
-from server.domain.types import ProductHit
+from server.domain.types import ProductHit, QueryPlan
 from server.llm.planner import PlannerError, plan_query
 from server.llm.reranker import RerankerError
 from server.rag.retrieval.dispatcher import RetrievalError
@@ -37,6 +37,33 @@ from server.tools._serializers import (
 from server.tools.base import AgentDeps, Tool, ToolError, ToolResult
 
 log = structlog.get_logger("shopmind.tools.search")
+
+
+def _relax_plan(plan: QueryPlan, query: str) -> QueryPlan:
+    """放宽 plan:摘掉 Planner 猜的开放类目(category/sub_category — 唯一会写错/挑错的硬约束),
+    其余约束(price/brand/闭集 gender/suitable_skin...)原样保留,原 query 落 text_query 走语义召回。
+
+    清掉类目后若 hard_constraints 全空,Dispatcher 自动降级 pure_semantic;否则 filtered_semantic。
+    """
+    relaxed_constraints = plan.hard_constraints.model_copy(
+        update={"category": None, "sub_category": None}
+    )
+    return plan.model_copy(
+        update={
+            "query_type": "filtered_semantic",
+            "hard_constraints": relaxed_constraints,
+            "text_query": plan.text_query or query,
+        }
+    )
+
+
+def _is_relaxed(plan: QueryPlan) -> bool:
+    """已经是"无类目 + 有 text_query"形态 → 不必再放宽(防止无谓重跑)。"""
+    return (
+        plan.hard_constraints.category is None
+        and plan.hard_constraints.sub_category is None
+        and plan.text_query is not None
+    )
 
 
 class SearchProductsInput(BaseModel):
@@ -92,6 +119,26 @@ class SearchProductsTool(Tool):
             raise ToolError(f"检索失败:{e}") from e
 
         hits: list[ProductHit] = retrieval_result.products
+
+        # 0 命中兜底(query relaxation):Planner 猜的 category/sub_category 是开放字符串,
+        # 会写错(如"牛奶"→"牡奶")或挑错,进 SQL 精确硬过滤就把结果清零。这里**只在 0 命中时**
+        # 摘掉这俩开放类目、保留用户明说/闭集的约束(price/brand/gender/suitable_skin...),
+        # 用原 query 走语义召回再兜一次。铁律不破:候选仍是真实 DB 商品,且后面 rerank 阈值照常裁决。
+        if not hits and not _is_relaxed(plan):
+            relaxed = _relax_plan(plan, query)
+            try:
+                retrieval_result = await deps.dispatcher.dispatch(relaxed)
+                hits = retrieval_result.products
+            except RetrievalError as e:
+                log.warning("search_relaxed_retrieval_failed", error=str(e))
+            if hits:
+                log.info(
+                    "search_relaxed_recovered",
+                    query=query,
+                    strategy=retrieval_result.strategy,
+                    n_hits=len(hits),
+                )
+
         if not hits:
             return ToolResult(
                 payload={

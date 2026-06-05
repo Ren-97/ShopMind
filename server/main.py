@@ -188,10 +188,11 @@ async def whoami(x_user_id: str = Header(default=config.DEFAULT_USER_ID)) -> dic
 # ─────────────────────────────────────────────────────────────
 # 业务路由(§4.7)
 # ─────────────────────────────────────────────────────────────
-from server.api import cart, chat, order, product, profile  # noqa: E402
+from server.api import catalog, cart, chat, order, product, profile  # noqa: E402
 
 app.include_router(chat.router)
 app.include_router(cart.router)
 app.include_router(product.router)
 app.include_router(order.router)
 app.include_router(profile.router)
+app.include_router(catalog.router)

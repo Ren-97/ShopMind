@@ -144,8 +144,11 @@ class UpdatePreferenceTool(Tool):
         async with deps.session_factory() as session:
             profile = await UserRepo.get_profile(session, user_id)
             if profile is None:
-                # 首次写:用 upsert 建一个空 profile
+                # 首次写(新用户尚无 profile 行):建一个空 profile。
+                # session autoflush=False,需显式 flush 才能让随后的 get_profile
+                # SELECT 到刚 merge 的新行,否则仍读到 None。
                 await UserRepo.upsert_profile(session, user_id)
+                await session.flush()
                 profile = await UserRepo.get_profile(session, user_id)
             assert profile is not None
 

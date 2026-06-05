@@ -24,6 +24,7 @@ fun CardListRenderer(
     onProductClick: (String) -> Unit,
     onCartClick: () -> Unit,
     onCheckoutClick: () -> Unit,
+    onSkuAdd: (skuId: String, title: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (cards.isEmpty()) return
@@ -41,6 +42,7 @@ fun CardListRenderer(
                         is CardData.Cart -> CartCard(c.data, onClickOpenCart = onCartClick)
                         is CardData.Checkout -> CheckoutCard(c.data, onClickGoCheckout = onCheckoutClick)
                         is CardData.Order -> OrderCard(c.data)
+                        is CardData.SkuSelector -> SkuSelectorCard(c.data, onAddSku = onSkuAdd)
                         is CardData.Product -> ProductCardRow(listOf(c.data), onProductClick)
                         is CardData.Unknown -> Unit
                     }
@@ -48,6 +50,15 @@ fun CardListRenderer(
             }
         }
     }
+}
+
+/**
+ * 卡片相对正文的位置:点评型(商品 / 对比 —— 文字在解读卡片)排在文字**上方**,
+ * 指令 / 结论型(规格选择 / 结算 / 订单 —— 文字引导或陈述,卡片是它指向的东西)排在文字**下方**。
+ */
+fun CardData.rendersBelowText(): Boolean = when (this) {
+    is CardData.SkuSelector, is CardData.Checkout, is CardData.Order -> true
+    else -> false
 }
 
 @Composable

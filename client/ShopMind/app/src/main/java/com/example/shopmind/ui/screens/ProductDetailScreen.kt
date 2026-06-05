@@ -49,7 +49,8 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import coil3.compose.AsyncImage
 import com.example.shopmind.domain.ProductDetail
-import com.example.shopmind.domain.SkuDetail
+import com.example.shopmind.domain.computeSkuDimensions
+import com.example.shopmind.domain.findMatchingSku
 import com.example.shopmind.network.RestApi
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
@@ -92,10 +93,10 @@ fun ProductDetailScreen(
     }
 
     val dimensions = remember(detail) {
-        detail?.skus?.let { computeSkuDimensions(it) } ?: emptyMap()
+        detail?.skus?.let { skus -> computeSkuDimensions(skus.map { it.properties }) } ?: emptyMap()
     }
     val matchedSku = remember(detail, selected.toMap()) {
-        detail?.let { findMatchingSku(it.skus, selected, dimensions.keys) }
+        detail?.let { findMatchingSku(it.skus, selected, dimensions.keys) { sku -> sku.properties } }
     }
     val canAdd = matchedSku != null && detail?.inStock == true && !adding
 
@@ -437,34 +438,8 @@ private fun SectionTitle(text: String) {
 }
 
 // ──────────────────────────────────────────────────────────────
-// SKU selector helpers
+// 属性展示 helper(选规格逻辑见 domain/SkuMatching.kt,与规格选择卡共用)
 // ──────────────────────────────────────────────────────────────
-private fun computeSkuDimensions(skus: List<SkuDetail>): Map<String, List<String>> {
-    val keyToValues = linkedMapOf<String, MutableList<String>>()
-    for (sku in skus) {
-        for ((k, v) in sku.properties) {
-            val s = (v as? JsonPrimitive)?.contentOrNull ?: continue
-            val bucket = keyToValues.getOrPut(k) { mutableListOf() }
-            if (s !in bucket) bucket.add(s)
-        }
-    }
-    return keyToValues.filter { it.value.size >= 2 }
-}
-
-private fun findMatchingSku(
-    skus: List<SkuDetail>,
-    selected: Map<String, String>,
-    dimensionKeys: Set<String>,
-): SkuDetail? {
-    if (dimensionKeys.isEmpty()) return skus.firstOrNull()
-    if (!dimensionKeys.all { selected[it]?.isNotEmpty() == true }) return null
-    return skus.firstOrNull { sku ->
-        dimensionKeys.all { key ->
-            (sku.properties[key] as? JsonPrimitive)?.contentOrNull == selected[key]
-        }
-    }
-}
-
 private fun primToList(el: JsonElement): List<String>? = when (el) {
     is JsonArray -> el.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
     is JsonPrimitive -> el.contentOrNull?.let { listOf(it) }

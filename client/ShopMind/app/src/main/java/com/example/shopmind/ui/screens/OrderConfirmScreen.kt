@@ -110,7 +110,9 @@ fun OrderConfirmScreen(
     }
     val displayTotal = displayItems.sumOf { it.subtotal }
 
-    val canSubmit = !submitting && address.isNotBlank() && displayItems.isNotEmpty()
+    val canSubmit = !submitting &&
+        recipientName.isNotBlank() && phone.isNotBlank() && address.isNotBlank() &&
+        displayItems.isNotEmpty()
 
     Scaffold(
         topBar = {
@@ -279,23 +281,23 @@ private fun AddressBlock(
                 tint = MaterialTheme.colorScheme.primary,
             )
             Column(modifier = Modifier.weight(1f)) {
-                if (address.isBlank()) {
+                val missing = buildList {
+                    if (recipientName.isBlank()) add("收件人")
+                    if (phone.isBlank()) add("电话")
+                    if (address.isBlank()) add("地址")
+                }
+                if (missing.isNotEmpty()) {
                     Text(
-                        "请填写收货地址",
+                        "请填写${missing.joinToString(" / ")}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error,
                     )
                 } else {
-                    val nameAndPhone = listOf(recipientName, phone)
-                        .filter { it.isNotBlank() }
-                        .joinToString("  ")
-                    if (nameAndPhone.isNotEmpty()) {
-                        Text(
-                            nameAndPhone,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
+                    Text(
+                        "$recipientName  $phone",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
                     Text(
                         address,
                         style = MaterialTheme.typography.bodySmall,

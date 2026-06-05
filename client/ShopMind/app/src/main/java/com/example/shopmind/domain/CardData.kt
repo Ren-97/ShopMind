@@ -19,6 +19,7 @@ sealed class CardData {
     data class Cart(val data: CartCardData) : CardData()
     data class Checkout(val data: CheckoutCardData) : CardData()
     data class Order(val data: OrderCardData) : CardData()
+    data class SkuSelector(val data: SkuSelectorCardData) : CardData()
 
     /** 未识别 type — 保留原始 JSON 给 debug,不阻塞渲染。 */
     data class Unknown(val rawType: String, val rawJson: JsonElement) : CardData()
@@ -34,6 +35,7 @@ sealed class CardData {
                 "cart" -> Cart(json.decodeFromJsonElement(CartCardData.serializer(), data))
                 "checkout" -> Checkout(json.decodeFromJsonElement(CheckoutCardData.serializer(), data))
                 "order" -> Order(json.decodeFromJsonElement(OrderCardData.serializer(), data))
+                "sku_selector" -> SkuSelector(json.decodeFromJsonElement(SkuSelectorCardData.serializer(), data))
                 else -> Unknown(type, obj)
             }
         }
@@ -78,6 +80,24 @@ data class CheckoutCardData(
     val phone: String? = null,
     @SerialName("total_price") val totalPrice: Double,
     @SerialName("item_count") val itemCount: Int,
+)
+
+@Serializable
+data class SkuSelectorCardData(
+    @SerialName("product_id") val productId: String,
+    val title: String,
+    @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("base_price") val basePrice: Double,
+    @SerialName("in_stock") val inStock: Boolean = true,
+    val dimensions: Map<String, List<String>> = emptyMap(),
+    val skus: List<SkuOption> = emptyList(),
+)
+
+@Serializable
+data class SkuOption(
+    @SerialName("sku_id") val skuId: String,
+    val properties: Map<String, JsonElement> = emptyMap(),
+    val price: Double,
 )
 
 @Serializable

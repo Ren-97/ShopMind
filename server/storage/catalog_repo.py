@@ -13,6 +13,7 @@ Chunk 1 范围:基础骨架 + 关键查询。复杂检索(filter / sku-price-mat
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -211,6 +212,74 @@ class CatalogRepo:
             select(func.count(Product.product_id)).where(Product.is_active.is_(True))
         )
         return int(result.scalar_one())
+
+    # ──────────────────────────────────────────────
+    # Facets(库存感知的 starter-chip 候选源)
+    # ──────────────────────────────────────────────
+    @staticmethod
+    async def get_facets(
+        session: AsyncSession, *, brands_per_category: int = 8
+    ) -> list[dict[str, Any]]:
+        """聚合"在售有货"商品 → 每个类目的 sub_categories / brands / 价位区间。
+
+        前端 starter chip 只从这里取词填模板,从而**构造上保证**点了必有结果
+        (库里没有的品牌/子类永不进 chip),且换数据集自动跟着变。
+
+        只统计 is_active AND in_stock 的商品(下架/缺货的不该被推成入口)。
+        目录规模小,单 SELECT 拉回 Python 聚合即可,无需 GROUP BY。
+        brands_per_category 按出现次数取 Top-N,避免长尾品牌塞满 chip。
+        """
+        rows = (
+            await session.execute(
+                select(
+                    Product.category,
+                    Product.sub_category,
+                    Product.brand,
+                    Product.base_price,
+                ).where(Product.is_active.is_(True), Product.in_stock.is_(True))
+            )
+        ).all()
+
+        # category → 累加器
+        acc: dict[str, dict[str, Any]] = {}
+        for category, sub_category, brand, base_price in rows:
+            bucket = acc.setdefault(
+                category,
+                {
+                    "category": category,
+                    "sub_categories": {},  # name → count
+                    "brands": {},  # name → count
+                    "price_min": base_price,
+                    "price_max": base_price,
+                    "product_count": 0,
+                },
+            )
+            bucket["product_count"] += 1
+            bucket["sub_categories"][sub_category] = (
+                bucket["sub_categories"].get(sub_category, 0) + 1
+            )
+            bucket["brands"][brand] = bucket["brands"].get(brand, 0) + 1
+            bucket["price_min"] = min(bucket["price_min"], base_price)
+            bucket["price_max"] = max(bucket["price_max"], base_price)
+
+        def _top(counts: dict[str, int], n: int | None = None) -> list[str]:
+            ordered = sorted(counts, key=lambda k: counts[k], reverse=True)
+            return ordered[:n] if n is not None else ordered
+
+        # 商品多的类目排前面 → 前端按序取,优先展示货最足的领域
+        return [
+            {
+                "category": b["category"],
+                "sub_categories": _top(b["sub_categories"]),
+                "brands": _top(b["brands"], brands_per_category),
+                "price_min": b["price_min"],
+                "price_max": b["price_max"],
+                "product_count": b["product_count"],
+            }
+            for b in sorted(
+                acc.values(), key=lambda b: b["product_count"], reverse=True
+            )
+        ]
 
     # ──────────────────────────────────────────────
     # 硬约束过滤(§4.1.3 Filtered Semantic / Structured 入口)
