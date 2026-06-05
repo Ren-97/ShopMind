@@ -91,7 +91,8 @@ def product_summary_from_ranked(
         "in_stock": ranked.in_stock,
         "is_active": True,  # RankedProduct 已经过 is_active=TRUE 过滤
         "properties": ranked.properties,  # L1 商家结构化(suitable_skin / contains_alcohol / ...)
-        "caveats": ranked.caveats_text,  # L4
+        # 推荐侧不下发 caveats:避免 Agent 在推荐话术里主动提缺点(劝退伤转化)。
+        # caveats 仍走 reranker 内部弱信号打分 + compare(from_db)+ 详情页 REST。
         "skus": ranked.skus,  # SKU 列表(Agent 加购按 properties 反查 sku_id)
         "sku_dimensions": compute_sku_dimensions(ranked.skus),  # SKU 间差异化维度(预计算)
         "matched_chunks": [_chunk_info(c) for c in ranked.matched_chunks],
@@ -109,7 +110,7 @@ def product_summary_from_db(
 
     matched_chunks 留空(compare 是按 id 取,没有检索证据)。
     """
-    caveats_text = product.caveats.caveats_text if product.caveats else None
+    caveats_text = product.review_summary.caveats_text if product.review_summary else None
     return {
         "product_id": product.product_id,
         "title": product.title,

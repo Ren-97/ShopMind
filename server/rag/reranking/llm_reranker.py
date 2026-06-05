@@ -65,7 +65,7 @@ def _format_chunks(chunks: list[MatchedChunk]) -> str:
 
 def _format_candidate(product: Product, hit: ProductHit) -> str:
     """单个候选拼成 markdown 块。caveats 走关联表(可为 None)。"""
-    caveats_text = product.caveats.caveats_text if product.caveats else None
+    caveats_text = product.review_summary.caveats_text if product.review_summary else None
     return (
         f"- product_id: {product.product_id}\n"
         f"  title: {product.title}\n"
@@ -87,7 +87,7 @@ def _build_input(query: str, pairs: list[tuple[Product, ProductHit]]) -> str:
 def _to_ranked_product(
     product: Product, hit: ProductHit, score: RankerScoreItem
 ) -> RankedProduct:
-    caveats_text = product.caveats.caveats_text if product.caveats else None
+    caveats_text = product.review_summary.caveats_text if product.review_summary else None
     return RankedProduct(
         product_id=product.product_id,
         relevance_score=score.relevance_score,

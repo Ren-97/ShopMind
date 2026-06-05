@@ -2,7 +2,7 @@
 SQLAlchemy v2 ORM 模型(对应 docs/design.md §4.4)。
 
 D1 商品族:products(含 JSONB properties)/ skus / product_faqs /
-            product_reviews / product_caveats
+            product_reviews / product_review_summary
 D2 用户态:users / user_profile / cart_items / orders / chat_history
 D3 索引衍生:ingest_manifest
 
@@ -84,7 +84,7 @@ class Product(Base):
     reviews: Mapped[list[ProductReview]] = relationship(
         back_populates="product", cascade="all, delete-orphan"
     )
-    caveats: Mapped[ProductCaveats | None] = relationship(
+    review_summary: Mapped[ProductReviewSummary | None] = relationship(
         back_populates="product", cascade="all, delete-orphan", uselist=False
     )
 
@@ -173,20 +173,25 @@ class ProductReview(Base):
     )
 
 
-class ProductCaveats(Base):
-    """LLM 离线抽出的 caveats(每商品 1 条,可空表示无负面信号)。"""
+class ProductReviewSummary(Base):
+    """LLM 离线抽出的评论平衡摘要(每商品 1 条)。
 
-    __tablename__ = "product_caveats"
+    highlights_text(优点)与 caveats_text(注意点)各自可空,
+    表示该面无成模式信号。
+    """
+
+    __tablename__ = "product_review_summary"
 
     product_id: Mapped[str] = mapped_column(
         ForeignKey("products.product_id", ondelete="CASCADE"), primary_key=True
     )
+    highlights_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     caveats_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     extracted_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.current_timestamp(), nullable=False
     )
 
-    product: Mapped[Product] = relationship(back_populates="caveats")
+    product: Mapped[Product] = relationship(back_populates="review_summary")
 
 
 # ═════════════════════════════════════════════════════════════
@@ -332,7 +337,7 @@ class IngestManifest(Base):
 
 __all__ = [
     # D1
-    "Product", "SKU", "ProductFAQ", "ProductReview", "ProductCaveats",
+    "Product", "SKU", "ProductFAQ", "ProductReview", "ProductReviewSummary",
     # D2
     "User", "UserProfile", "CartItem", "Order", "ChatHistory",
     # D3

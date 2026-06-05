@@ -49,8 +49,8 @@ from server.indexing.manifest import (
     diff_by_identity,
     review_identity_hash,
 )
-from server.llm.caveats_extractor import extract_caveats
 from server.llm.review_sentiment import classify_review
+from server.llm.review_summarizer import summarize_reviews
 from server.rag.embedders import Embedder, get_embedder
 from server.rag.sparse import JiebaBM25Encoder, SparseEncoder, SparseVector
 from server.storage.catalog_repo import CatalogRepo
@@ -58,9 +58,9 @@ from server.storage.db import AsyncSessionLocal, create_all
 from server.storage.manifest_repo import ManifestRepo
 from server.storage.models import (
     Product,
-    ProductCaveats,
     ProductFAQ,
     ProductReview,
+    ProductReviewSummary,
     SKU,
 )
 from server.storage.vector_index import VectorIndex, get_vector_index
@@ -152,8 +152,8 @@ class _ChunkToUpsert:
 # ═════════════════════════════════════════════════════════════
 # Caveats 触发判断(§4.5.4)
 # ═════════════════════════════════════════════════════════════
-def _should_extract_caveats(
-    existing: ProductCaveats | None,
+def _should_resummarize(
+    existing: ProductReviewSummary | None,
     review_change_count: int,
     old_review_count: int,
 ) -> tuple[bool, str | None]:
@@ -372,8 +372,8 @@ async def _sync_product(
             )
 
     # Review chunks:仅 NEW 的走 LLM sentiment + chunk + embed
-    # caveats_pool 收 3 元组 (rating, content, sentiment) — sentiment 给后面过滤用
-    quality_reviews_for_caveats: list[tuple[int, str, float | None]] = []
+    # 摘要分层采样需 sentiment 分池,收 (rating, content, sentiment) 三元组
+    quality_reviews_for_summary: list[tuple[int, str, float | None]] = []
     for ident in review_diff.new:
         spec_r = new_review_by_ident[ident]
         if not is_quality_review(spec_r.content):
@@ -402,42 +402,56 @@ async def _sync_product(
                 },
             )
         )
-        quality_reviews_for_caveats.append((spec_r.rating, spec_r.content, sentiment.sentiment))
+        quality_reviews_for_summary.append((spec_r.rating, spec_r.content, sentiment.sentiment))
 
-    # ── (7) Caveats:触发判断 → 抽 + 存 + chunk ──
-    existing_caveats_stmt = select(ProductCaveats).where(ProductCaveats.product_id == pid)
-    existing_caveats = (await session.execute(existing_caveats_stmt)).scalar_one_or_none()
+    # ── (7) 评论摘要:触发判断 → 抽 + 存 + chunk ──
+    existing_summary_stmt = select(ProductReviewSummary).where(
+        ProductReviewSummary.product_id == pid
+    )
+    existing_summary = (await session.execute(existing_summary_stmt)).scalar_one_or_none()
 
-    needs_caveats, reason = _should_extract_caveats(
-        existing=existing_caveats,
+    needs_summary, reason = _should_resummarize(
+        existing=existing_summary,
         review_change_count=review_diff.change_count,
         old_review_count=len(old_reviews),
     )
     caveats_chunk_present = False
-    if needs_caveats:
-        log.info("caveats_extract_triggered", product_id=pid, reason=reason)
-        # 收 3 元组 (rating, content, sentiment);NEW 走刚算的 sentiment,回退走 SQL.sentiment
-        pool: list[tuple[int, str, float | None]] = list(quality_reviews_for_caveats)
+    if needs_summary:
+        log.info("review_summary_triggered", product_id=pid, reason=reason)
+        pool: list[tuple[int, str, float | None]] = list(quality_reviews_for_summary)
         if not pool:
-            # 重抽场景:NEW 没有 quality,用现存 SQL reviews(含 sentiment 列,§4.5.2 V1 改进)
+            # 重抽场景:NEW 没有 quality,用现存 SQL reviews
             for r in old_reviews:
                 if is_quality_review(r.content):
                     pool.append((r.rating, r.content, r.sentiment))
-        # 过滤:rating ≤ 3 或 sentiment 明显负面 → 才视为 caveats 候选;None 安全降级
-        quality_pool: list[tuple[int, str]] = [
-            (r, c)
-            for r, c, s in pool
-            if r <= config.CAVEATS_NEGATIVE_RATING_MAX
-            or (s is not None and s < config.CAVEATS_NEGATIVE_SENTIMENT_THRESHOLD)
-        ]
+        # 分层采样:正/负分池各取上限,保证少数差评不被好评淹没
+        negative: list[tuple[int, str]] = []
+        positive: list[tuple[int, str]] = []
+        for rating, content, sentiment_score in pool:
+            is_negative = rating <= config.CAVEATS_NEGATIVE_RATING_MAX or (
+                sentiment_score is not None
+                and sentiment_score < config.CAVEATS_NEGATIVE_SENTIMENT_THRESHOLD
+            )
+            (negative if is_negative else positive).append((rating, content))
+        sampled = (
+            negative[: config.SUMMARY_MAX_NEGATIVE]
+            + positive[: config.SUMMARY_MAX_POSITIVE]
+        )
         try:
-            result = await extract_caveats(spec.title, quality_pool)
+            result = await summarize_reviews(
+                spec.title,
+                sampled,
+                total_reviews=len(pool),
+                negative_reviews=len(negative),
+            )
         except Exception as e:
-            log.warning("caveats_extract_failed", product_id=pid, error=str(e))
+            log.warning("review_summary_failed", product_id=pid, error=str(e))
             result = None
 
         if result is not None:
-            await CatalogRepo.upsert_caveats(session, pid, result.caveats_text)
+            await CatalogRepo.upsert_review_summary(
+                session, pid, result.caveats_text, result.highlights
+            )
             if result.caveats_text:
                 cav_text = build_caveats_chunk_text(result.caveats_text)
                 chunks_to_upsert.append(
@@ -456,7 +470,7 @@ async def _sync_product(
             else:
                 # 无负面信号 → 删除可能残留的 caveats chunk
                 await _delete_points(vector_index, [f"{pid}_caveats"])
-    elif existing_caveats is not None and existing_caveats.caveats_text:
+    elif existing_summary is not None and existing_summary.caveats_text:
         caveats_chunk_present = True  # 沿用旧 caveats chunk(未触发重抽)
 
     # ── (8) 批量 embed + upsert ──

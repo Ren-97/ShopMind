@@ -37,8 +37,8 @@ def test_import_all_chunk2_modules() -> None:
     import server.indexing.manifest  # noqa: F401
     import server.llm  # noqa: F401
     import server.llm.anthropic_client  # noqa: F401
-    import server.llm.caveats_extractor  # noqa: F401
     import server.llm.review_sentiment  # noqa: F401
+    import server.llm.review_summarizer  # noqa: F401
     import server.rag.embedders  # noqa: F401
     import server.rag.embedders.protocol  # noqa: F401
     import server.rag.sparse  # noqa: F401
@@ -324,22 +324,26 @@ def test_review_sentiment_result_schema() -> None:
         ReviewSentimentResult(sentiment=2.0, aspects=[])  # 超界
 
 
-def test_caveats_result_schema() -> None:
-    from server.llm.caveats_extractor import CaveatsResult
+def test_review_summary_schema() -> None:
+    from server.llm.review_summarizer import ReviewSummary
 
-    r = CaveatsResult(caveats_text=None, confidence=0.0)
+    r = ReviewSummary(highlights=None, caveats_text=None, confidence=0.0)
+    assert r.highlights is None
     assert r.caveats_text is None
 
-    r2 = CaveatsResult(caveats_text="部分用户反馈刺痛", confidence=0.7)
+    r2 = ReviewSummary(
+        highlights="多数用户认可保湿", caveats_text="部分用户反馈刺痛", confidence=0.7
+    )
     assert r2.confidence == 0.7
 
 
 @pytest.mark.asyncio
-async def test_extract_caveats_empty_reviews_no_api_call() -> None:
-    """空 reviews → 直接返回 (null, 0.0),不发请求。"""
-    from server.llm.caveats_extractor import extract_caveats
+async def test_summarize_reviews_empty_reviews_no_api_call() -> None:
+    """空 reviews → 直接返回 (null, null, 0.0),不发请求。"""
+    from server.llm.review_summarizer import summarize_reviews
 
-    result = await extract_caveats("某商品", [])
+    result = await summarize_reviews("某商品", [])
+    assert result.highlights is None
     assert result.caveats_text is None
     assert result.confidence == 0.0
 

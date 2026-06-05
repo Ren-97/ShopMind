@@ -68,7 +68,7 @@ def test_models_count() -> None:
     expected = {
         # D1
         "products", "skus", "product_faqs",
-        "product_reviews", "product_caveats",
+        "product_reviews", "product_review_summary",
         # D2
         "users", "user_profile", "cart_items", "orders", "chat_history",
         # D3

@@ -27,6 +27,7 @@ data class ProductDetail(
     val skus: List<SkuDetail> = emptyList(),
     val faqs: List<FaqDetail> = emptyList(),
     val reviews: List<ReviewDetail> = emptyList(),
+    val highlights: String? = null,
     val caveats: String? = null,
 )
 

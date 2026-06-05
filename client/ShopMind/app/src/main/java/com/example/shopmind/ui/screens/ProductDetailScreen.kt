@@ -18,7 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,6 +31,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,6 +57,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+
+/** 常见问题 / 用户评论默认预览条数,超出折叠到「查看全部」。 */
+private const val DETAIL_PREVIEW_COUNT = 3
 
 /**
  * 商品详情(GET /product/{id})+ SKU selector + 加购按钮。
@@ -204,6 +207,8 @@ private fun DetailBody(
     onSelect: (String, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var faqsExpanded by remember { mutableStateOf(false) }
+    var reviewsExpanded by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 16.dp),
@@ -278,43 +283,6 @@ private fun DetailBody(
                 }
             }
         }
-        // Caveats(详情页完整呈现 — 用户决策位置)
-        detail.caveats?.takeIf { it.isNotBlank() }?.let { caveats ->
-            item {
-                Surface(
-                    color = Color(0xFFFFF3E0),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(
-                            Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = Color(0xFFEF6C00),
-                        )
-                        Column {
-                            Text(
-                                "使用提醒",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFFEF6C00),
-                            )
-                            Text(
-                                caveats,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF6D4C00),
-                            )
-                        }
-                    }
-                }
-            }
-        }
         item { PropertiesSection(detail, Modifier.padding(horizontal = 16.dp)) }
         detail.marketingDescription?.takeIf { it.isNotBlank() }?.let { desc ->
             item {
@@ -330,7 +298,8 @@ private fun DetailBody(
                     SectionTitle("常见问题")
                 }
             }
-            items(items = detail.faqs, key = { it.question }) { faq ->
+            val visibleFaqs = if (faqsExpanded) detail.faqs else detail.faqs.take(DETAIL_PREVIEW_COUNT)
+            items(items = visibleFaqs, key = { it.question }) { faq ->
                 Column(
                     modifier = Modifier.padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -347,6 +316,16 @@ private fun DetailBody(
                     )
                 }
             }
+            if (detail.faqs.size > DETAIL_PREVIEW_COUNT) {
+                item {
+                    TextButton(
+                        onClick = { faqsExpanded = !faqsExpanded },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    ) {
+                        Text(if (faqsExpanded) "收起" else "查看全部 ${detail.faqs.size} 条问题")
+                    }
+                }
+            }
         }
         if (detail.reviews.isNotEmpty()) {
             item {
@@ -354,7 +333,19 @@ private fun DetailBody(
                     SectionTitle("用户评论 (${detail.reviews.size})")
                 }
             }
-            items(items = detail.reviews, key = { it.reviewId }) { r ->
+            // 评论摘要卡(大家怎么说)— 评论列表之上,读评论前先定调(对标 Amazon Customers say)
+            if (!detail.highlights.isNullOrBlank() || !detail.caveats.isNullOrBlank()) {
+                item {
+                    ReviewSummaryCard(
+                        highlights = detail.highlights,
+                        caveats = detail.caveats,
+                        reviewCount = detail.reviews.size,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+            }
+            val visibleReviews = if (reviewsExpanded) detail.reviews else detail.reviews.take(DETAIL_PREVIEW_COUNT)
+            items(items = visibleReviews, key = { it.reviewId }) { r ->
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         repeat((r.rating ?: 0).coerceIn(0, 5)) {
@@ -375,6 +366,16 @@ private fun DetailBody(
                     Text(r.content, style = MaterialTheme.typography.bodySmall)
                 }
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            }
+            if (detail.reviews.size > DETAIL_PREVIEW_COUNT) {
+                item {
+                    TextButton(
+                        onClick = { reviewsExpanded = !reviewsExpanded },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    ) {
+                        Text(if (reviewsExpanded) "收起" else "查看全部 ${detail.reviews.size} 条评论")
+                    }
+                }
             }
         }
     }
@@ -424,6 +425,62 @@ private fun PropertyChipRow(label: String, values: List<String>) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ReviewSummaryCard(
+    highlights: String?,
+    caveats: String?,
+    reviewCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(10.dp),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "大家怎么说 · AI 摘要自 $reviewCount 条评论",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            highlights?.takeIf { it.isNotBlank() }?.let {
+                SummaryRow(label = "优点", labelColor = Color(0xFF2E7D32), text = it)
+            }
+            caveats?.takeIf { it.isNotBlank() }?.let {
+                SummaryRow(label = "注意", labelColor = Color(0xFFEF6C00), text = it)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryRow(label: String, labelColor: Color, text: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Surface(shape = RoundedCornerShape(4.dp), color = labelColor.copy(alpha = 0.12f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = labelColor,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

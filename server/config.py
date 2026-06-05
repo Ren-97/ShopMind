@@ -85,15 +85,18 @@ REVIEW_MIN_LENGTH: int = _env_int("REVIEW_MIN_LENGTH", 20)
 REVIEW_DUP_CHAR_RATIO_MAX: float = _env_float("REVIEW_DUP_CHAR_RATIO_MAX", 0.5)
 # 嵌入批大小:Gemini 单次硬上限 100,OpenAI 2048;统一保守 64
 EMBEDDING_BATCH_SIZE: int = _env_int("EMBEDDING_BATCH_SIZE", 64)
-# Caveats LLM 输出长度上限(§4.5.3 / §4.5.4)
+# 评论摘要(highlights + caveats)LLM 输出长度上限,每字段(§4.5.3 / §4.5.4)
 CAVEATS_TEXT_MAX_CHARS: int = _env_int("CAVEATS_TEXT_MAX_CHARS", 200)
 # matched_chunk 文本喂给 LLM(rerank + Agent payload)前的截断长度
 MATCHED_CHUNK_TEXT_MAX_CHARS: int = _env_int("MATCHED_CHUNK_TEXT_MAX_CHARS", 300)
-# Caveats 输入 reviews 过滤阈值(§4.5.4):rating ≤ 3 或 sentiment < 阈值 才视为可能含负面信号
+# 评论分池阈值(§4.5.4):rating ≤ 阈值 或 sentiment < 阈值 → 归入负面池
 CAVEATS_NEGATIVE_SENTIMENT_THRESHOLD: float = _env_float(
     "CAVEATS_NEGATIVE_SENTIMENT_THRESHOLD", -0.2
 )
 CAVEATS_NEGATIVE_RATING_MAX: int = _env_int("CAVEATS_NEGATIVE_RATING_MAX", 3)
+# 摘要分层采样上限:负面 / 正面各最多喂 N 条进 LLM,保证少数差评不被好评淹没
+SUMMARY_MAX_NEGATIVE: int = _env_int("SUMMARY_MAX_NEGATIVE", 3)
+SUMMARY_MAX_POSITIVE: int = _env_int("SUMMARY_MAX_POSITIVE", 6)
 
 # ─────────────────────────────────────────────────────────────
 # Agent(§4.6)
@@ -197,6 +200,7 @@ __all__ = [
     "EMBEDDING_BATCH_SIZE", "CAVEATS_TEXT_MAX_CHARS",
     "MATCHED_CHUNK_TEXT_MAX_CHARS",
     "CAVEATS_NEGATIVE_SENTIMENT_THRESHOLD", "CAVEATS_NEGATIVE_RATING_MAX",
+    "SUMMARY_MAX_NEGATIVE", "SUMMARY_MAX_POSITIVE",
     # Agent
     "MAX_AGENT_TURNS", "THINKING_BUDGET_TOKENS", "AGENT_MAX_TOKENS",
     "AGENT_RECENT_TURNS", "COMPARE_MIN_ITEMS", "COMPARE_MAX_ITEMS",

@@ -139,7 +139,7 @@ def test_reranker_few_shot_inputs_validate() -> None:
 def test_llm_reranker_format_candidate() -> None:
     from server.domain.types import MatchedChunk, ProductHit
     from server.rag.reranking.llm_reranker import _format_candidate
-    from server.storage.models import Product, ProductCaveats
+    from server.storage.models import Product, ProductReviewSummary
 
     p = Product(
         product_id="p_x001",
@@ -152,7 +152,7 @@ def test_llm_reranker_format_candidate() -> None:
         is_active=True,
         properties={"suitable_skin": ["敏感肌"]},
     )
-    p.caveats = ProductCaveats(
+    p.review_summary = ProductReviewSummary(
         product_id="p_x001", caveats_text="部分用户反馈瓶口设计"
     )
 
@@ -232,7 +232,7 @@ def test_llm_reranker_build_input_shape() -> None:
         sub_category="s", base_price=100.0, in_stock=True, is_active=True,
         properties={},
     )
-    p.caveats = None
+    p.review_summary = None
     hit = ProductHit(product_id="p_x001", score=0.5, matched_chunks=[])
     text = _build_input("query 测试", [(p, hit)])
     assert text.startswith("# Query: query 测试")

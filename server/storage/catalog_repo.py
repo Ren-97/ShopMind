@@ -23,9 +23,9 @@ from server.domain.types import HardConstraints
 from server.indexing.brand_aliases import normalize_brand
 from server.storage.models import (
     Product,
-    ProductCaveats,
     ProductFAQ,
     ProductReview,
+    ProductReviewSummary,
     SKU,
 )
 
@@ -92,7 +92,7 @@ class CatalogRepo:
                 selectinload(Product.skus),
                 selectinload(Product.faqs),
                 selectinload(Product.reviews),
-                selectinload(Product.caveats),
+                selectinload(Product.review_summary),
             )
         )
         if not include_inactive:
@@ -193,13 +193,18 @@ class CatalogRepo:
             session.add(review)
 
     @staticmethod
-    async def upsert_caveats(
+    async def upsert_review_summary(
         session: AsyncSession,
         product_id: str,
         caveats_text: str | None,
+        highlights_text: str | None = None,
     ) -> None:
-        caveats = ProductCaveats(product_id=product_id, caveats_text=caveats_text)
-        await session.merge(caveats)
+        summary = ProductReviewSummary(
+            product_id=product_id,
+            caveats_text=caveats_text,
+            highlights_text=highlights_text,
+        )
+        await session.merge(summary)
 
     # ──────────────────────────────────────────────
     # 列表 / 计数(eval + 调试用)
