@@ -55,7 +55,13 @@ class Reranker(Protocol):
 
     name: str  # observability
 
-    async def rerank(self, query: str, hits: list[ProductHit]) -> list[RankedProduct]:
+    async def rerank(
+        self,
+        query: str,
+        hits: list[ProductHit],
+        *,
+        profile: dict[str, Any] | None = None,
+    ) -> list[RankedProduct]:
         ...
 
 

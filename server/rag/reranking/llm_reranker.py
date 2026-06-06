@@ -14,11 +14,14 @@ LLM Hard Fail(RerankerError)→ 透传上抛(§4.2.7 同款 Hard Fail 路径,不
 
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from server import config
 from server.domain.types import MatchedChunk, ProductHit
+from server.indexing.brand_aliases import normalize_brand
 from server.llm.reranker import RankerScoreItem, rank_candidates
 from server.rag.reranking.protocol import RankedProduct
 from server.storage.catalog_repo import CatalogRepo
@@ -113,6 +116,85 @@ def _to_ranked_product(
     )
 
 
+# profile.gender(英文)→ 商品 properties.gender(中文)映射
+_GENDER_MAP: dict[str, str] = {"female": "女", "male": "男", "女": "女", "男": "男"}
+
+# profile.os_pref → 对应品牌(系统偏好没有结构化字段,落到品牌这个结构化维度)
+_OS_BRAND: dict[str, str] = {"iOS": "Apple 苹果"}
+
+
+def _age_bucket(age: Any) -> str | None:
+    """profile.age(具体岁数)→ 商品 age_group 档位(取 ≤age 的最近档)。"""
+    if not isinstance(age, (int, float)):
+        return None
+    if age >= 30:
+        return "30+"
+    if age >= 25:
+        return "25+"
+    if age >= 20:
+        return "20+"
+    return None
+
+
+def _profile_fit_boost(product: RankedProduct, profile: dict[str, Any] | None) -> float:
+    """确定性个性化加分(§4.3 profile resort 层)。读 product.properties / brand 对**画像里
+    结构化可映射的偏好**打分,返回封顶 ±`PROFILE_FIT_BOOST_CAP` 的微调量。
+
+    设计:relevance(LLM 打的分)是主维度;本函数只在**已过阈值的合格集**内做同档排序微调
+    (适合用户的往前提),**不淘汰任何商品** —— 调用方在 threshold 过滤之后才加它,合格集已锁定。
+
+    **只处理结构化 / 可精确映射的偏好**(闭集字段、品牌、os→品牌)。usage / style / dietary 这类
+    "开放同义词"偏好(用户说"摄影"、商品标"拍照")精确规则匹配不到、又无干净结构化字段 → V1 不做个性化
+    (要做得靠语义匹配,V2 再议)。命中信号(各 ±PROFILE_FIT_SIGNAL_WEIGHT,求和后封顶):
+    肤质适配(+)/明确不适配(−)、偏好品牌(+)、系统偏好→品牌(iOS⇒Apple,+)、
+    无香诉求一致(+)、年龄段(+)、性别(+)、护肤诉求∩商品功效(+)。
+    """
+    if not profile:
+        return 0.0
+    prefs = profile.get("preferences") or {}
+    props = product.properties or {}
+    w = config.PROFILE_FIT_SIGNAL_WEIGHT
+    score = 0.0
+
+    # 肤质:适配 + / 明确不适配 −(不适配只排后,不淘汰)
+    skin = prefs.get("skin_type")
+    if skin:
+        if skin in (props.get("suitable_skin") or []):
+            score += w
+        elif skin in (props.get("not_suitable_skin") or []):
+            score -= w
+
+    # 偏好品牌(normalize 后比较,容忍别名)
+    brand_prefer = {normalize_brand(b) for b in (prefs.get("brand_prefer") or []) if b}
+    if brand_prefer and normalize_brand(product.brand) in brand_prefer:
+        score += w
+
+    # 系统偏好 → 品牌(iOS ⇒ Apple);os_pref 没有结构化商品字段,落到品牌维度
+    os_brand = _OS_BRAND.get(str(prefs.get("os_pref") or ""))
+    if os_brand and normalize_brand(product.brand) == normalize_brand(os_brand):
+        score += w
+
+    # 无香诉求 ↔ 商品无香
+    if prefs.get("fragrance_pref") == "无香" and props.get("contains_fragrance") is False:
+        score += w
+
+    # 年龄段 / 性别:精确档位匹配才加,"通用"=中性不加(避免无差别加分)
+    bucket = _age_bucket(profile.get("age"))
+    if bucket and props.get("age_group") == bucket:
+        score += w
+    gender = _GENDER_MAP.get(str(profile.get("gender") or ""))
+    if gender and props.get("gender") == gender:
+        score += w
+
+    # 护肤诉求 ∩ 商品功效(保湿 / 舒缓 …)
+    concerns = set(prefs.get("skin_concerns") or [])
+    if concerns and concerns & set(props.get("effects") or []):
+        score += w
+
+    cap = config.PROFILE_FIT_BOOST_CAP
+    return max(-cap, min(cap, score))
+
+
 class LLMReranker:
     """V1 默认 Reranker:Claude Haiku 4.5 + Tool Use(§4.3.2)。"""
 
@@ -157,7 +239,11 @@ class LLMReranker:
         return pairs
 
     async def rerank(
-        self, query: str, hits: list[ProductHit]
+        self,
+        query: str,
+        hits: list[ProductHit],
+        *,
+        profile: dict[str, Any] | None = None,
     ) -> list[RankedProduct]:
         if not hits:
             log.info("reranker_skip", reason="empty_hits")
@@ -191,9 +277,14 @@ class LLMReranker:
                 continue
             ranked.append(_to_ranked_product(product, hit, score))
 
-        # 5) 阈值过滤 + 排序 + 截顶
+        # 5) 阈值过滤 → 个性化 fit 重排(确定性,只在合格集内排序、不淘汰)→ 截顶
+        # fit 加在 threshold 过滤**之后** → 合格集已锁定,加分只影响排序 + 谁进 top_n,绝不踢人
+        # (浏览型 query 的安全垫)。relevance 仍是主维度,fit 顶多 ±PROFILE_FIT_BOOST_CAP 同档微调。
         qualified = [r for r in ranked if r.relevance_score >= self._threshold]
-        qualified.sort(key=lambda r: r.relevance_score, reverse=True)
+        qualified.sort(
+            key=lambda r: r.relevance_score + _profile_fit_boost(r, profile),
+            reverse=True,
+        )
         result = qualified[: self._top_n]
 
         log.info(

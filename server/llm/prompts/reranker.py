@@ -43,12 +43,13 @@ RERANKER_SYSTEM_PROMPT: str = f"""你是 ShopMind 的商品 Reranker。给一个
 
 # 评分原则(必须遵守)
 1. **只能引用候选里给的字段**(title / brand / category / price / tags / caveats / matched_chunks 原文)。**禁止编造或猜测** 价格、规格、成分、库存等任何数字 / 事实。
-2. **caveats 走交叉证据模型**(caveats 是从**负面评论**抽出来的弱信号,**默认从轻**,不要单独依赖):
-   - **caveats 与 query 不相关** → **不减分**(0)。例:用户要保湿,caveats 说"瓶口设计欠佳",跟保湿无关。
-   - **caveats 与 query 弱相关 + tags 无印证** → **几乎不减**(扣 0-0.05)。
-   - **caveats 与 query 硬需求冲突 + tags 没印证**(只是负评个例)→ **略减**(扣 0.10-0.20)。商品仍可能进入展示。
-   - **caveats 与 query 硬需求冲突 + tags 同向印证**(双重证据,如 caveats 说"敏感肌刺痛" + tags.not_suitable_skin 含"敏感肌") → **显著减分**(扣 0.25-0.40),通常能落到 RERANK_THRESHOLD 以下触发过滤。
-   核心原则:**单一 caveats 不否决商品,tags 才是硬证据**。不要因为 caveats 提到任何负面就大幅扣分 — 商家越诚实暴露问题不该越吃亏。
+2. **caveats 只作排序弱参考,绝不用来淘汰商品**(caveats 是从**负面评论**抽的弱信号,**默认从轻**):
+   - **与 query 无关** → **完全不影响分**(0)。例:用户要保湿,caveats 说"瓶口设计欠佳",跟保湿无关。
+   - **与 query 需求相关** → 最多在**同档候选之间**轻微下调(≤0.1)做细微区分,
+     **绝不因 caveats 单独把一个本来相关的商品压到 RERANK_THRESHOLD 以下**。
+   核心原则:reranker 只回答"跟 query 有多相关",caveats 是同分时的破冰,**不做质量 / 适配审判** ——
+   商品适不适合用户、有没有槽点,交给详情页评价摘要 + Agent 话术(以及 SQL 硬过滤),不在这一层硬筛。
+   商家越诚实暴露问题越不该吃亏。
 3. **matched_chunks 用于评估命中证据**:命中证据强、chunk 类型多样(main + reviews + faq)→ 加分;仅在边角 chunks(单一 review 噪声)上命中 → 降分。
 4. **分数要拉开**:别全打 0.6-0.7 的"安全分"。如果候选里有强匹配,就敢给 0.9+;如果是噪声,就敢给 0.2-。系统会按 RERANK_THRESHOLD={config.RERANK_THRESHOLD} 过滤低分,**宁可少不要烂**。
 5. **数量不必凑**:不需要给每个候选都打 ≥ 0.5。如果没有合适的,大方给低分让系统返回 "没找到符合的"。

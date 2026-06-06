@@ -66,44 +66,24 @@ def _is_relaxed(plan: QueryPlan) -> bool:
     )
 
 
-def _flatten_soft_values(soft: dict[str, Any]) -> list[str]:
-    """soft_preferences 所有值摊平成 token(str 直接进,list 逐项进)。"""
-    tokens: list[str] = []
-    for v in (soft or {}).values():
-        if isinstance(v, str):
-            tokens.append(v)
-        elif isinstance(v, list):
-            tokens.extend(str(x) for x in v if x)
-    return tokens
+def _merge_profile_brand_exclude(
+    plan: QueryPlan, profile: dict[str, Any] | None
+) -> QueryPlan:
+    """画像里不喜欢的品牌(profile.preferences.brand_exclude)→ 并进
+    hard_constraints.brand_exclude(明确厌恶 = 硬过滤掉;去重,品牌别名 normalize 在 Repo 层做)。
 
-
-def _apply_profile_prefs(plan: QueryPlan, profile: dict[str, Any] | None) -> QueryPlan:
-    """画像偏好显式落到检索 plan —— `soft_preferences` 字段本身没有任何打分器消费,
-    必须在这里折成检索信号才会生效(否则 soft 等于白填)。
-
-    - **brand_exclude(画像里不喜欢的牌子)→ 并进 hard_constraints.brand_exclude**:
-      明确厌恶 = 硬过滤掉(去重;品牌别名 normalize 在 Repo 层做)。
-    - **brand_prefer + soft_preferences 值 → 揉进 text_query**:软加分,经召回 embedding
-      + reranker 把"偏好品牌 / 适合你的"排前面,不硬筛别的。仅语义召回路径(text_query
-      非空)折入;纯 SQL 路径(structured / id_lookup,text_query 为空)不动。
+    其余画像偏好(肤质 / 品牌偏好 / 年龄 / 性别 / 护肤诉求等)由 reranker 的确定性 fit 重排
+    (`_profile_fit_boost`)在阈值过滤后做 ±微调,不在检索 query 层处理。
     """
     prefs = (profile or {}).get("preferences") or {}
-    hc = plan.hard_constraints
-
     profile_excludes = [b for b in (prefs.get("brand_exclude") or []) if b]
-    if profile_excludes:
-        merged = list(dict.fromkeys([*hc.brand_exclude, *profile_excludes]))
-        hc = hc.model_copy(update={"brand_exclude": merged})
-
-    text = plan.text_query
-    if text:
-        extra_raw = _flatten_soft_values(plan.soft_preferences)
-        extra_raw += [b for b in (prefs.get("brand_prefer") or []) if b]
-        extra = [t for t in extra_raw if t and t not in text]
-        if extra:
-            text = text + " " + " ".join(extra)
-
-    return plan.model_copy(update={"hard_constraints": hc, "text_query": text})
+    if not profile_excludes:
+        return plan
+    merged = list(
+        dict.fromkeys([*plan.hard_constraints.brand_exclude, *profile_excludes])
+    )
+    hc = plan.hard_constraints.model_copy(update={"brand_exclude": merged})
+    return plan.model_copy(update={"hard_constraints": hc})
 
 
 class SearchProductsInput(BaseModel):
@@ -151,8 +131,8 @@ class SearchProductsTool(Tool):
             log.warning("search_planner_failed", error=str(e))
             raise ToolError(f"无法理解 query:{e}") from e
 
-        # 1.5) 画像偏好显式落地:brand_exclude → hard 过滤;brand_prefer + soft → text_query 软加分
-        plan = _apply_profile_prefs(plan, deps.user_profile)
+        # 1.5) 画像里不喜欢的品牌 → 并进 hard 过滤(其余画像偏好走 reranker 的确定性 fit 重排)
+        plan = _merge_profile_brand_exclude(plan, deps.user_profile)
 
         # 2) Dispatcher(adaptive retrieval)
         try:
@@ -201,13 +181,12 @@ class SearchProductsTool(Tool):
             )
 
         # 3) Reranker(LLM Haiku;阈值过滤 + DB enrich)
-        # 用 plan.text_query(已被 _apply_profile_prefs 揉入 soft + brand_prefer,如
-        # "精华 敏感肌 无香 保湿 雅诗兰黛")而非用户原话:reranker 是唯一会重排序的环节,
-        # 喂揉进画像偏好的检索串才能把"适合你的 / 偏好品牌"排前面(否则软信号在重排被抹平)。
-        # text_query 缺失时(理论上 rerank 路径不会)回落原话。
-        rerank_query = plan.text_query or query
+        # rerank query 只评 query↔商品相关性;画像个性化由 reranker 内部的确定性 fit 重排(profile)
+        # 在阈值过滤**之后**做 ±微调,绝不淘汰(§4.3)—— 浏览型 query 不会被收成 1 个。
         try:
-            ranked = await deps.reranker.rerank(rerank_query, hits)
+            ranked = await deps.reranker.rerank(
+                plan.text_query or query, hits, profile=deps.user_profile
+            )
         except RerankerError as e:
             log.warning("search_reranker_failed", error=str(e))
             raise ToolError(f"重排失败:{e}") from e
