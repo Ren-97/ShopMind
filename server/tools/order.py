@@ -39,8 +39,8 @@ class StartCheckoutTool(Tool):
         "启动结算流程。读取当前购物车 + 用户档案地址,做库存/有效性预检,"
         "返回 checkout 卡片(items 快照 + 地址 + 总价)给客户端。"
         "**不真下单** — 用户必须在客户端确认页点 [确认下单] 才真创建订单。"
-        "购物车为空 / 地址缺失 / 有缺货商品时会报错,需先用 manage_cart "
-        "或 update_preference 处理。"
+        "收货信息缺失不报错(用户在结算页填);仅购物车为空 / 有缺货商品时报错,"
+        "需先用 manage_cart 处理。"
     )
     input_model: ClassVar[type[BaseModel]] = StartCheckoutInput
 
@@ -56,24 +56,13 @@ class StartCheckoutTool(Tool):
             if not cart_items:
                 raise ToolError("购物车是空的,先把要买的商品加进购物车再结算")
 
+            # 收货三件套从 profile 预填(可缺);缺了也照常出结算卡,
+            # 让用户在客户端确认页一次性填,不强迫写回 profile(A/B 决策)。
             profile = await UserRepo.get_profile(session, user_id)
             address = profile.address if profile else None
             recipient_name = profile.recipient_name if profile else None
             phone = profile.phone if profile else None
-            missing = [
-                label
-                for value, label in (
-                    (recipient_name, "收件人"),
-                    (phone, "联系电话"),
-                    (address, "收货地址"),
-                )
-                if not value
-            ]
-            if missing:
-                raise ToolError(
-                    f"还差{'、'.join(missing)} — 告诉我就行(我帮你记到资料里),"
-                    "或者去个人资料页补全"
-                )
+            needs_shipping_info = not (address and recipient_name and phone)
 
             sku_ids = [it.sku_id for it in cart_items]
             sku_to_product = await CatalogRepo.list_products_by_sku_ids(
@@ -126,6 +115,7 @@ class StartCheckoutTool(Tool):
                 "total_price": total_price,
                 "item_count": item_count,
                 "address": address,
+                "needs_shipping_info": needs_shipping_info,
             },
             cards=[card],
         )

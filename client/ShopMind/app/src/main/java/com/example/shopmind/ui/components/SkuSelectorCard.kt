@@ -17,7 +17,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,16 +34,17 @@ import com.example.shopmind.domain.findMatchingSku
  * 聊天内嵌的规格选择卡(形态 B):多规格商品加购时,用户原地点选规格 → 直接加购。
  *
  * 选 SKU 逻辑复用 [findMatchingSku] —— 每维点一个值,选满即本地反查出唯一 sku_id,
- * 全程不经过 LLM。点 [加入购物车] 回调 [onAddSku],由 ViewModel 走 POST /cart。
+ * 全程不经过 LLM。点 [加入购物车] 回调 [onAddSku](带选定数量),由 ViewModel 走 POST /cart。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SkuSelectorCard(
     data: SkuSelectorCardData,
-    onAddSku: (skuId: String, title: String) -> Unit,
+    onAddSku: (skuId: String, title: String, qty: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val selected = remember(data.productId) { mutableStateMapOf<String, String>() }
+    var qty by remember(data.productId) { mutableStateOf(1) }
     val matchedSku: SkuOption? = remember(data, selected.toMap()) {
         findMatchingSku(data.skus, selected, data.dimensions.keys) { it.properties }
     }
@@ -98,18 +101,29 @@ fun SkuSelectorCard(
             }
 
             val price = matchedSku?.price ?: data.basePrice
-            Button(
-                onClick = { matchedSku?.let { onAddSku(it.skuId, data.title) } },
-                enabled = canAdd,
-                modifier = Modifier.fillMaxWidth(),
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    when {
-                        !data.inStock -> "暂时缺货"
-                        matchedSku == null -> "请选规格"
-                        else -> "加入购物车 · ¥${"%.0f".format(price)}"
-                    }
+                QuantityStepper(
+                    qty = qty,
+                    onDecrease = { qty = (qty - 1).coerceAtLeast(1) },
+                    onIncrease = { qty += 1 },
+                    enabled = data.inStock,
                 )
+                Button(
+                    onClick = { matchedSku?.let { onAddSku(it.skuId, data.title, qty) } },
+                    enabled = canAdd,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        when {
+                            !data.inStock -> "暂时缺货"
+                            matchedSku == null -> "请选规格"
+                            else -> "加入购物车 · ¥${"%.0f".format(price * qty)}"
+                        }
+                    )
+                }
             }
         }
     }

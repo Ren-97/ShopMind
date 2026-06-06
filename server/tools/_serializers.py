@@ -296,7 +296,7 @@ def checkout_card(
     cart_items: list[CartItem],
     *,
     sku_to_product: dict[str, Product],
-    address: str,
+    address: str | None,
     recipient_name: str | None,
     phone: str | None,
     base_url: str,
@@ -338,7 +338,8 @@ def checkout_card(
         "type": "checkout",
         "data": {
             "items": items_data,
-            "address": address,
+            # 地址可缺(用户到结算页填):schema 保持 address 恒为字符串,缺则空串
+            "address": address or "",
             "recipient_name": recipient_name,
             "phone": phone,
             "total_price": round(total, 2),

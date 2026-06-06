@@ -24,7 +24,7 @@ fun CardListRenderer(
     onProductClick: (String) -> Unit,
     onCartClick: () -> Unit,
     onCheckoutClick: () -> Unit,
-    onSkuAdd: (skuId: String, title: String) -> Unit,
+    onSkuAdd: (skuId: String, title: String, qty: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (cards.isEmpty()) return

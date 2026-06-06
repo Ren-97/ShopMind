@@ -17,7 +17,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,6 +55,8 @@ import com.example.shopmind.domain.ProductDetail
 import com.example.shopmind.domain.computeSkuDimensions
 import com.example.shopmind.domain.findMatchingSku
 import com.example.shopmind.network.RestApi
+import com.example.shopmind.ui.components.QuantityStepper
+import com.example.shopmind.ui.nav.Routes
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -79,6 +84,8 @@ fun ProductDetailScreen(
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var qty by remember { mutableStateOf(1) }
+    var cartCount by remember { mutableStateOf(0) }
     val selected = remember { mutableStateMapOf<String, String>() }
     val scope = rememberCoroutineScope()
     val snackbarHost = remember { SnackbarHostState() }
@@ -93,6 +100,11 @@ fun ProductDetailScreen(
         } finally {
             loading = false
         }
+    }
+
+    // 角标数量与详情解耦:拉失败不影响商品展示,静默兜底为 0
+    LaunchedEffect(Unit) {
+        runCatching { cartCount = rest.getCart().itemCount }
     }
 
     val dimensions = remember(detail) {
@@ -110,6 +122,16 @@ fun ProductDetailScreen(
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    BadgedBox(
+                        badge = { if (cartCount > 0) Badge { Text(cartCount.toString()) } },
+                        modifier = Modifier.padding(end = 12.dp),
+                    ) {
+                        IconButton(onClick = { navController.navigate(Routes.CART) }) {
+                            Icon(Icons.Default.ShoppingCart, contentDescription = "购物车")
+                        }
                     }
                 },
             )
@@ -132,15 +154,22 @@ fun ProductDetailScreen(
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f),
                         )
+                        QuantityStepper(
+                            qty = qty,
+                            onDecrease = { qty = (qty - 1).coerceAtLeast(1) },
+                            onIncrease = { qty += 1 },
+                            enabled = !adding,
+                        )
                         Button(
                             onClick = {
                                 val sku = matchedSku ?: return@Button
                                 adding = true
                                 scope.launch {
                                     try {
-                                        rest.addToCart(skuId = sku.skuId, qty = 1)
+                                        val updated = rest.addToCart(skuId = sku.skuId, qty = qty)
+                                        cartCount = updated.itemCount
                                         onCartChanged()
-                                        snackbarHost.showSnackbar("已加入购物车")
+                                        snackbarHost.showSnackbar("已加入购物车 ×$qty")
                                     } catch (e: Exception) {
                                         snackbarHost.showSnackbar(e.message ?: "加购失败")
                                     } finally {

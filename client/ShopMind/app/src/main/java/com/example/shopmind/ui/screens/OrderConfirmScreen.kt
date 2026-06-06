@@ -1,5 +1,6 @@
 package com.example.shopmind.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -56,6 +58,8 @@ import com.example.shopmind.network.RestApi
 import com.example.shopmind.ui.nav.Routes
 import com.example.shopmind.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * 下单确认页 — 跑通业务闭环的最后一步。
@@ -85,6 +89,8 @@ fun OrderConfirmScreen(
     var recipientName by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var editorOpen by remember { mutableStateOf(false) }
+    // C1:勾选后下单时把这次三件套 PATCH 回 profile(显式 opt-in,默认不存)
+    var saveAsDefault by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
     val snackbarHost = remember { SnackbarHostState() }
@@ -160,6 +166,18 @@ fun OrderConfirmScreen(
                                             skuIds = selectedSkuIds.ifEmpty { null },
                                         )
                                         val order = rest.placeOrder(req)
+                                        // 勾了「保存为我的收货信息」才回写 profile;失败不挡下单成功
+                                        if (saveAsDefault) {
+                                            runCatching {
+                                                rest.patchProfile(
+                                                    buildJsonObject {
+                                                        put("recipient_name", recipientName.trim())
+                                                        put("phone", phone.trim())
+                                                        put("address", address.trim())
+                                                    }.toString()
+                                                )
+                                            }
+                                        }
                                         chatViewModel.insertOrderCard(order)
                                         navController.popBackStack(
                                             route = Routes.CHAT,
@@ -204,6 +222,8 @@ fun OrderConfirmScreen(
                 recipientName = recipientName,
                 phone = phone,
                 onEditAddress = { editorOpen = true },
+                saveAsDefault = saveAsDefault,
+                onToggleSave = { saveAsDefault = it },
                 modifier = Modifier.padding(padding),
             )
         }
@@ -232,6 +252,8 @@ private fun ConfirmBody(
     recipientName: String,
     phone: String,
     onEditAddress: () -> Unit,
+    saveAsDefault: Boolean,
+    onToggleSave: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -246,6 +268,20 @@ private fun ConfirmBody(
                 phone = phone,
                 onEdit = onEditAddress,
             )
+        }
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggleSave(!saveAsDefault) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(checked = saveAsDefault, onCheckedChange = onToggleSave)
+                Text(
+                    "保存为我的收货信息(下次自动填)",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
         item {
             Text(

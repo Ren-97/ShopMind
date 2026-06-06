@@ -15,8 +15,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,6 +36,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
@@ -53,6 +57,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.example.shopmind.domain.ProfileResponse
 import com.example.shopmind.network.RestApi
+import com.example.shopmind.ui.components.AddPreferenceDialog
+import com.example.shopmind.ui.components.PrefCategory
+import com.example.shopmind.ui.components.defaultPrefCategories
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -76,7 +83,7 @@ import kotlinx.serialization.json.putJsonObject
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun ProfileScreen(navController: NavController) {
+fun ProfileScreen(navController: NavController, onboarding: Boolean = false) {
     val rest = remember { RestApi() }
     val scope = rememberCoroutineScope()
     val snackbarHost = remember { SnackbarHostState() }
@@ -85,6 +92,9 @@ fun ProfileScreen(navController: NavController) {
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
+    var addPrefOpen by remember { mutableStateOf(false) }
+    // 品牌候选(添加偏好用):开放词表,从目录 facets 拉;失败静默兜底空
+    var brands by remember { mutableStateOf<List<String>>(emptyList()) }
 
     // 身份 + 收货:本地可编辑(表单),初始化自首次拉取
     var gender by remember { mutableStateOf<String?>(null) }
@@ -117,6 +127,10 @@ fun ProfileScreen(navController: NavController) {
         }
     }
 
+    LaunchedEffect(Unit) {
+        runCatching { brands = rest.getFacets().categories.flatMap { it.brands }.distinct() }
+    }
+
     // 删除一条标签(consumption_tier 列 / preferences key 或其 list 中一项)
     fun deleteTag(body: String) {
         scope.launch {
@@ -128,13 +142,50 @@ fun ProfileScreen(navController: NavController) {
         }
     }
 
+    // 添加偏好:list 字段与现有值合并去重后整列回写;单值 / consumption_tier 列直接覆盖
+    fun addPreference(cat: PrefCategory, values: List<String>) {
+        if (values.isEmpty()) return
+        scope.launch {
+            try {
+                val body = if (cat.isColumn) {
+                    buildJsonObject { put(cat.key, values.first()) }.toString()
+                } else {
+                    buildJsonObject {
+                        putJsonObject("preferences") {
+                            if (cat.isList) {
+                                val existing = profile?.preferences?.get(cat.key)
+                                    ?.let { jsonElementToStrings(it) }.orEmpty()
+                                val merged = (existing + values).distinct()
+                                putJsonArray(cat.key) { merged.forEach { add(it) } }
+                            } else {
+                                put(cat.key, values.first())
+                            }
+                        }
+                    }.toString()
+                }
+                profile = rest.patchProfile(body)
+                snackbarHost.showSnackbar("已添加")
+            } catch (e: Exception) {
+                snackbarHost.showSnackbar(e.message ?: "添加失败")
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("个人资料") },
+                title = { Text(if (onboarding) "完善资料" else "个人资料") },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    // 仅新建用户落地时给显式「跳过」:profile 全可选,不填也能直接开聊
+                    if (onboarding) {
+                        TextButton(onClick = { navController.popBackStack() }) {
+                            Text("跳过")
+                        }
                     }
                 },
             )
@@ -306,8 +357,31 @@ fun ProfileScreen(navController: NavController) {
                         }
                     }
                 }
+
+                AssistChip(
+                    onClick = { addPrefOpen = true },
+                    label = { Text("添加偏好") },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(AssistChipDefaults.IconSize),
+                        )
+                    },
+                )
             }
         }
+    }
+
+    if (addPrefOpen) {
+        AddPreferenceDialog(
+            categories = defaultPrefCategories(brands),
+            onConfirm = { cat, values ->
+                addPrefOpen = false
+                addPreference(cat, values)
+            },
+            onDismiss = { addPrefOpen = false },
+        )
     }
 }
 

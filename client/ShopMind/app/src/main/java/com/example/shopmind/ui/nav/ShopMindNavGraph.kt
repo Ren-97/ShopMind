@@ -22,8 +22,17 @@ fun ShopMindNavGraph(
         composable(Routes.CHAT) {
             ChatScreen(navController = navController, vm = chatViewModel)
         }
-        composable(Routes.PROFILE) {
-            ProfileScreen(navController = navController)
+        composable(
+            route = Routes.PROFILE_ROUTE,
+            arguments = listOf(
+                navArgument(Routes.PROFILE_ARG) {
+                    type = NavType.BoolType
+                    defaultValue = false
+                },
+            ),
+        ) { backStackEntry ->
+            val onboarding = backStackEntry.arguments?.getBoolean(Routes.PROFILE_ARG) ?: false
+            ProfileScreen(navController = navController, onboarding = onboarding)
         }
         composable(
             route = Routes.PRODUCT_DETAIL,

@@ -126,8 +126,12 @@ class ChatViewModel @JvmOverloads constructor(
         loadHistory()
     }
 
-    /** ➕ 新建空白用户:POST /users → 加进列表 → 切过去(落到空 profile / 空对话)。 */
-    fun createUser(displayName: String) {
+    /**
+     * ➕ 新建空白用户:POST /users → 加进列表 → 切过去(落到空 profile / 空对话)。
+     * 成功后回调 [onCreated](主线程),由 UI 跳个人资料页让用户当场填资料 / 选偏好,
+     * 想跳过按返回即可(profile 全可选)。
+     */
+    fun createUser(displayName: String, onCreated: () -> Unit = {}) {
         val name = displayName.trim()
         if (name.isEmpty()) return
         viewModelScope.launch {
@@ -135,6 +139,7 @@ class ChatViewModel @JvmOverloads constructor(
                 val created = rest.createUser(name)
                 _state.update { it.copy(availableUsers = it.availableUsers + created) }
                 switchUser(created.userId)
+                onCreated()
             } catch (e: Exception) {
                 onError("create_user_failed", e.message ?: "新建用户失败")
             }
@@ -323,12 +328,13 @@ class ChatViewModel @JvmOverloads constructor(
      * 成功后补一条导购跟进气泡 + "去结算"引导 chip(本地生成,不调 LLM),给对话一个收尾、
      * 顺势推进下单 —— 否则加完购物车原地不动会显得很突兀。
      */
-    fun addSkuFromSelector(skuId: String, title: String) {
+    fun addSkuFromSelector(skuId: String, title: String, qty: Int = 1) {
         viewModelScope.launch {
             try {
-                applyCartSnapshot(rest.addToCart(skuId))
+                applyCartSnapshot(rest.addToCart(skuId, qty))
+                val qtyHint = if (qty > 1) " ×$qty" else ""
                 val followUp = ChatMessage.Assistant(
-                    text = "已经帮你把「$title」加进购物车啦 🛒 要现在去结算,还是再看看别的?",
+                    text = "已经帮你把「$title」$qtyHint 加进购物车啦 🛒 要现在去结算,还是再看看别的?",
                     suggestions = listOf(
                         SuggestionItem(label = "去结算", query = "我要结算下单"),
                         SuggestionItem(label = "再看看别的", query = "再看看别的"),

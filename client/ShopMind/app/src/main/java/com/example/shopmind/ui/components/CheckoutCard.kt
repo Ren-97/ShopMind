@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
@@ -50,11 +52,17 @@ fun CheckoutCard(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            // 地址区
+            Text(
+                "请核对收货信息,如有不符可点击修改",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            // 地址区(点笔 → 进确认页改地址,与「去结算」同一目的地)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp),
+                    .padding(top = 4.dp),
                 verticalAlignment = Alignment.Top,
             ) {
                 Icon(
@@ -63,7 +71,11 @@ fun CheckoutCard(
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp),
                 )
-                Column(modifier = Modifier.padding(start = 6.dp)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 6.dp),
+                ) {
                     val nameAndPhone = listOfNotNull(data.recipientName, data.phone)
                         .joinToString("  ")
                     if (nameAndPhone.isNotEmpty()) {
@@ -74,9 +86,17 @@ fun CheckoutCard(
                         )
                     }
                     Text(
-                        data.address,
+                        data.address.ifBlank { "收货信息待填写 · 点「去结算」填写" },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onClickGoCheckout, modifier = Modifier.size(24.dp)) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "修改收货信息",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary,
                     )
                 }
             }

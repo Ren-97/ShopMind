@@ -114,7 +114,9 @@ fun ChatScreen(
     }
     val onCartClick: () -> Unit = { navController.navigate(Routes.CART) }
     val onCheckoutClick: () -> Unit = { navController.navigate(Routes.CHECKOUT) }
-    val onSkuAdd: (String, String) -> Unit = { skuId, title -> vm.addSkuFromSelector(skuId, title) }
+    val onSkuAdd: (String, String, Int) -> Unit = { skuId, title, qty ->
+        vm.addSkuFromSelector(skuId, title, qty)
+    }
     val onSuggestionClick: (SuggestionItem) -> Unit = { item ->
         // V1:所有 suggestion 都当消息发出去(包括"去结算"也由 Agent 处理路由判断)
         vm.sendMessage(item.query)
@@ -309,7 +311,8 @@ fun ChatScreen(
                 TextButton(
                     onClick = {
                         newUserDialogOpen = false
-                        vm.createUser(newName)
+                        // 创建成功后跳个人资料页(onboarding 模式,右上角显式「跳过」):当场可填资料 / 选偏好
+                        vm.createUser(newName) { navController.navigate(Routes.profileOnboarding()) }
                     },
                     enabled = newName.isNotBlank(),
                 ) { Text("创建") }
@@ -393,7 +396,7 @@ private fun AssistantBubble(
     onProductClick: (String) -> Unit,
     onCartClick: () -> Unit,
     onCheckoutClick: () -> Unit,
-    onSkuAdd: (skuId: String, title: String) -> Unit,
+    onSkuAdd: (skuId: String, title: String, qty: Int) -> Unit,
     onSuggestionClick: (SuggestionItem) -> Unit,
     showSpinnerIfNothing: Boolean = false,
 ) {

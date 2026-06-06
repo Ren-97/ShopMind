@@ -21,14 +21,13 @@ log = structlog.get_logger("shopmind.tools.preference")
 
 
 # 白名单(§4.6.3)
-# 注:身份基础属性(gender / age / height_cm / weight_kg)**不在**对话写入白名单。
-# 这些字段易被"找女士运动服"/"42 码鞋"等代购/搜索 query 误触发污染身份档,
-# 强制走 PATCH /profile(Android 个人资料页)。Agent 看到也不写。
+# 注:身份基础属性(gender / age / height_cm / weight_kg)+ 收货三件套
+# (address / recipient_name / phone)**不在**对话写入白名单。
+# 身份属性易被"找女士运动服"/"42 码鞋"等代购/搜索 query 误触发污染身份档;
+# 收货信息则不该被下单对话静默改默认地址 —— 两类都强制走 PATCH /profile
+# (Android 个人资料页 / 结算页),Agent 看到也不写。
 _COLUMN_FIELDS: dict[str, type] = {
     "consumption_tier": str,
-    "recipient_name": str,
-    "phone": str,
-    "address": str,
 }
 
 # preferences JSON 里允许的 key(可继续扩展)
@@ -48,7 +47,6 @@ _PREFERENCE_KEYS: set[str] = {
 
 PreferenceField = Literal[
     "consumption_tier",
-    "recipient_name", "phone", "address",
     "skin_type", "skin_concerns", "fragrance_pref",
     "brand_prefer", "brand_exclude",
     "usage", "os_pref",
@@ -63,10 +61,10 @@ class UpdatePreferenceInput(BaseModel):
     field: PreferenceField = Field(
         description=(
             "要更新的字段名,必须在白名单内。"
-            "首类字段(consumption_tier / address / recipient_name / phone)写到 profile 列;"
-            "其它字段写到 preferences JSON。"
-            "**注意**:gender / age / height_cm / weight_kg 不在白名单内 — "
-            "这些身份基础属性由用户在个人资料页表单填写,不通过对话写入。"
+            "consumption_tier 写到 profile 列;其它字段写到 preferences JSON。"
+            "**注意**:身份基础属性(gender / age / height_cm / weight_kg)和收货信息"
+            "(address / recipient_name / phone)不在白名单内 —— "
+            "由用户在个人资料页表单 / 结算页填写,不通过对话写入。"
         )
     )
     value: Any = Field(
@@ -121,10 +119,11 @@ def _coerce_value(field: str, value: Any) -> Any:
 class UpdatePreferenceTool(Tool):
     name: ClassVar[str] = "update_preference"
     description: ClassVar[str] = (
-        "把用户的稳定偏好(肤质 / 品牌偏好 / 尺码 / 收货信息等)写进 user_profile。"
+        "把用户的稳定偏好(肤质 / 品牌偏好 / 尺码 / 消费档位等)写进 user_profile。"
         "只在用户明确陈述**本人**事实时调,**不要**为模糊语句 / 本次约束 / 闲聊 / "
         "搜索条件('找女士款')/ 代购语境('给妈妈买')调。"
-        "身份基础属性(性别 / 年龄 / 身高 / 体重)不通过本工具写,由用户在个人资料页填。"
+        "身份基础属性(性别 / 年龄 / 身高 / 体重)和收货信息(地址 / 收件人 / 电话)"
+        "不通过本工具写,由用户在个人资料页 / 结算页填。"
         "**撤销**:用户纠正之前的错填时(例如'我不是敏感肌'),传 value=null 清除该字段。"
         "写完后在回复里说一句'已记下你是 ...'或'已清除 ...',让用户能纠正。"
     )
