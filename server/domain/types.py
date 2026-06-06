@@ -124,7 +124,7 @@ class MatchedChunk(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     chunk_id: str
-    chunk_type: str  # main / faq / review / caveats
+    chunk_type: str  # main / faq / review
     text: str
     score: float
 

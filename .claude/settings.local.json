@@ -83,7 +83,8 @@
       "PowerShell($jbr = Get-ChildItem \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\",\"$env:LOCALAPPDATA\\\\Programs\\\\Android Studio\\\\jbr\" -ErrorAction SilentlyContinue | Select-Object -First 1; if \\($jbr\\) { $env:JAVA_HOME = $jbr.FullName }; echo \"JAVA_HOME=$env:JAVA_HOME\"; & \"D:\\\\ShopMind\\\\client\\\\ShopMind\\\\gradlew.bat\" -p \"D:\\\\ShopMind\\\\client\\\\ShopMind\" compileDebugKotlin --console=plain -q)",
       "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; if \\(-not \\(Test-Path $env:JAVA_HOME\\)\\) { $env:JAVA_HOME = \"$env:LOCALAPPDATA\\\\Programs\\\\Android Studio\\\\jbr\" }; echo \"JAVA_HOME=$env:JAVA_HOME\"; & \"D:\\\\ShopMind\\\\client\\\\ShopMind\\\\gradlew.bat\" -p \"D:\\\\ShopMind\\\\client\\\\ShopMind\" compileDebugKotlin --console=plain -q)",
       "Bash(git mv *)",
-      "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; if \\(-not \\(Test-Path $env:JAVA_HOME\\)\\) { $env:JAVA_HOME = \"$env:LOCALAPPDATA\\\\Programs\\\\Android Studio\\\\jbr\" }; & \"D:\\\\ShopMind\\\\client\\\\ShopMind\\\\gradlew.bat\" -p \"D:\\\\ShopMind\\\\client\\\\ShopMind\" compileDebugKotlin --console=plain -q)"
+      "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; if \\(-not \\(Test-Path $env:JAVA_HOME\\)\\) { $env:JAVA_HOME = \"$env:LOCALAPPDATA\\\\Programs\\\\Android Studio\\\\jbr\" }; & \"D:\\\\ShopMind\\\\client\\\\ShopMind\\\\gradlew.bat\" -p \"D:\\\\ShopMind\\\\client\\\\ShopMind\" compileDebugKotlin --console=plain -q)",
+      "Bash(env)"
     ]
   }
 }

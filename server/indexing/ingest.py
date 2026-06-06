@@ -37,7 +37,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server import config
 from server.indexing.brand_aliases import normalize_brand
 from server.indexing.chunking import (
-    build_caveats_chunk_text,
     build_faq_chunk_text,
     build_main_chunk_text,
     build_review_chunk_text,
@@ -415,7 +414,6 @@ async def _sync_product(
         review_change_count=review_diff.change_count,
         old_review_count=len(old_reviews),
     )
-    caveats_chunk_present = False
     if needs_summary:
         log.info("review_summary_triggered", product_id=pid, reason=reason)
         pool: list[tuple[int, str, float | None]] = list(quality_reviews_for_summary)
@@ -452,26 +450,12 @@ async def _sync_product(
             await CatalogRepo.upsert_review_summary(
                 session, pid, result.caveats_text, result.highlights
             )
-            if result.caveats_text:
-                cav_text = build_caveats_chunk_text(result.caveats_text)
-                chunks_to_upsert.append(
-                    _ChunkToUpsert(
-                        chunk_id=f"{pid}_caveats",
-                        text=cav_text,
-                        payload={
-                            "product_id": pid,
-                            "chunk_type": "caveats",
-                            "text": cav_text,
-                            "confidence": result.confidence,
-                        },
-                    )
-                )
-                caveats_chunk_present = True
-            else:
-                # 无负面信号 → 删除可能残留的 caveats chunk
-                await _delete_points(vector_index, [f"{pid}_caveats"])
-    elif existing_summary is not None and existing_summary.caveats_text:
-        caveats_chunk_present = True  # 沿用旧 caveats chunk(未触发重抽)
+
+    # caveats 只进 SQL(review_summary),不切 chunk:负面摘要进了向量库会被召回、漏进推荐侧
+    # matched_chunks(推荐场景不下发缺点),还会污染召回("因为有这个毛病反而被搜出来")。
+    # reranker / 对比 / 详情页 REST / 用户主动问(id_lookup)全部读 DB 字段,不依赖该 chunk。
+    # 无条件删,清掉历史可能残留的 caveats 点(幂等)。
+    await _delete_points(vector_index, [f"{pid}_caveats"])
 
     # ── (8) 批量 embed + upsert ──
     await _upsert_chunks(
@@ -488,7 +472,7 @@ async def _sync_product(
         spec_r = new_review_by_ident[ident]
         if is_quality_review(spec_r.content):
             quality_review_count += 1
-    chunk_count = 1 + len(spec.faqs) + quality_review_count + (1 if caveats_chunk_present else 0)
+    chunk_count = 1 + len(spec.faqs) + quality_review_count
     return chunk_count, new_main_chunk_hash
 
 

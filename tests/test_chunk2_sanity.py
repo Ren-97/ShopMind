@@ -29,7 +29,6 @@ if str(_ROOT) not in sys.path:
 def test_import_all_chunk2_modules() -> None:
     import server.indexing  # noqa: F401
     import server.indexing.chunking  # noqa: F401
-    import server.indexing.chunking.caveats_chunker  # noqa: F401
     import server.indexing.chunking.faq_chunker  # noqa: F401
     import server.indexing.chunking.main_chunker  # noqa: F401
     import server.indexing.chunking.review_chunker  # noqa: F401
@@ -143,14 +142,6 @@ def test_review_chunker_text() -> None:
         build_review_chunk_text(rating=5, nickname="阿凯", content="超好用")
         == "[5星] 阿凯: 超好用"
     )
-
-
-def test_caveats_chunker() -> None:
-    from server.indexing.chunking import build_caveats_chunk_text
-
-    text = build_caveats_chunk_text("部分敏感肌用户反馈刺痛。")
-    assert text.startswith("⚠️ 注意:")
-    assert "部分敏感肌用户反馈刺痛。" in text
 
 
 # ──────────────────────────────────────────────────────────────

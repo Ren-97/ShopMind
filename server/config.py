@@ -73,7 +73,7 @@ PLANNER_RECENT_TURNS: int = _env_int("PLANNER_RECENT_TURNS", 5)
 # ─────────────────────────────────────────────────────────────
 COARSE_THRESHOLD: float = _env_float("COARSE_THRESHOLD", 0.005)  # 粗排 RRF 阈值
 RERANK_THRESHOLD: float = _env_float("RERANK_THRESHOLD", 0.5)  # LLM 自评分阈值
-RERANK_TOP_N: int = _env_int("RERANK_TOP_N", 5)
+RERANK_TOP_N: int = _env_int("RERANK_TOP_N", 4)
 
 # ─────────────────────────────────────────────────────────────
 # Indexing(§4.5)

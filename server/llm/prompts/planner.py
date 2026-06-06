@@ -189,6 +189,27 @@ PLANNER_FEW_SHOT_MESSAGES: list[dict[str, Any]] = [
             "confidence": 0.92,
         }
     ),
+    # 2.5) 美妆 — 画像偏好软化(对照 #1/#2)
+    #    教学:用户**本句没提**肤质,只是浏览型 query;[用户档案] 里的敏感肌 / 无香是
+    #    长期画像,**不进 hard_constraints**(进了会把候选 SQL 砍到几乎为空),只融进
+    #    soft_preferences + text_query,让 reranker 把"适合你的"排前面。hard 里只留
+    #    从 query 本身能确定的 category / sub_category。
+    _user_with_prev_result(
+        "[用户档案] {'skin_type': '敏感肌', 'fragrance_pref': '无香'}\n我想买精华,有什么推荐"
+    ),
+    _assistant_tool_use(
+        {
+            "query_type": "filtered_semantic",
+            "hard_constraints": {
+                "category": "美妆护肤",
+                "sub_category": "精华",
+            },
+            "soft_preferences": {"skin": ["敏感肌"], "fragrance": ["无香"]},
+            "text_query": "敏感肌 无香 精华",
+            "referenced_product_ids": [],
+            "confidence": 0.9,
+        }
+    ),
     # 3) 数码 — structured(纯硬过滤,无语义诉求)
     #    教学:sub_category + brand 精确 + 价格 + in_stock,text_query=null
     _user_with_prev_result("8000 块以下的苹果手机,在售的"),
