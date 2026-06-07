@@ -86,7 +86,9 @@
       "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; if \\(-not \\(Test-Path $env:JAVA_HOME\\)\\) { $env:JAVA_HOME = \"$env:LOCALAPPDATA\\\\Programs\\\\Android Studio\\\\jbr\" }; & \"D:\\\\ShopMind\\\\client\\\\ShopMind\\\\gradlew.bat\" -p \"D:\\\\ShopMind\\\\client\\\\ShopMind\" compileDebugKotlin --console=plain -q)",
       "Bash(env)",
       "Bash(grep -vE \"^[+-]\\\\s*$\")",
-      "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; & .\\\\client\\\\ShopMind\\\\gradlew.bat -p client\\\\ShopMind compileDebugKotlin --console=plain)"
+      "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; & .\\\\client\\\\ShopMind\\\\gradlew.bat -p client\\\\ShopMind compileDebugKotlin --console=plain)",
+      "Bash(py -c \"import json; d=json.load\\(open\\('tests/eval_cases.json',encoding='utf-8'\\)\\); print\\('cases:', len\\(d['cases']\\)\\); print\\('with history:', sum\\(1 for c in d['cases'] if c.get\\('history'\\)\\)\\); print\\('with session_seed:', [c['id'] for c in d['cases'] if c.get\\('session_state_seed'\\)]\\)\")",
+      "Bash(py -m py_compile tests/eval_runner.py)"
     ]
   }
 }

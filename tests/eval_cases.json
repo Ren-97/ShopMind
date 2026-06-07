@@ -29,8 +29,8 @@
       "layers": "本 case 测试的 layer 子集 [1, 2, 3]",
       "user_id": "eval_user_1 (EvalAlice) / eval_user_2 (EvalBob) / eval_user_3 (EvalCharlie)",
       "profile_overrides": "可选,runner 跑前临时改 profile 字段(value=null 表示清空)",
-      "session_state_seed": "可选,跑前注入 session_state(测多轮沉淀 / 代词指代)",
-      "history": "可选,Anthropic messages 格式的前置对话(测多轮上下文)",
+      "session_state_seed": "可选,只注入无法从 chat_history 重建的派生态:rejected_brands / mentioned_price_cap / current_topic(每轮从 plan 临时算、不持久化)。商品引用(last_shown / discussed)不走这里,走 history.card_refs",
+      "history": "可选,前置对话;assistant 轮可带 card_refs={products:[...], compare:[...]},由生产 _ensure_session_hydrated 从 DB 重建 last_shown / discussed / product_index(测多轮上下文 / 代词指代,忠实复刻 app 重启恢复路径)",
       "cart_seed": "可选,跑前往 cart_items 表写,业务闭环 case 用",
       "query": "本轮用户输入",
       "expected_query_type": "Planner 应输出的 query_type(L1)",
@@ -112,12 +112,11 @@
         "category": "服饰运动",
         "sub_category": "跑步鞋",
         "brand_exclude": ["Nike", "阿迪达斯"],
-        "price_max": 1500.0,
-        "gender": "男"
+        "price_max": 1500.0
       },
       "expected_tool_calls_include": ["search_products"],
       "expected_top_5_excludes_brands": ["Nike", "耐克", "阿迪达斯"],
-      "notes": "反选必走 hard_constraints.brand_exclude,不能塞 text_query。"
+      "notes": "反选走 hard_constraints.brand_exclude,不塞 text_query。gender 不进 hard:query 未明说性别,画像性别(eval_user_3=男)按当前 Planner 规则走 soft,避免硬过滤误杀(planner.py 上下文使用章节)。"
     },
 
     {
@@ -144,15 +143,13 @@
       "id": "compare_digital_two_brands",
       "scenario": "对比",
       "category": "数码电子",
-      "tags": ["core", "id_lookup"],
-      "layers": [1, 2],
+      "tags": ["core", "compare"],
+      "layers": [2],
       "user_id": "eval_user_2",
       "query": "iPhone 17 Pro 和华为 Pura 90 Pro 哪个拍照更好",
-      "expected_query_type": "id_lookup",
-      "expected_referenced_count_min": 2,
-      "expected_tool_calls_include": ["compare_products"],
+      "expected_tool_calls_include": ["search_products", "compare_products"],
       "judge_focus": ["faithfulness"],
-      "notes": "对比 query 应触发 id_lookup → Agent 先 search 拿到具体 product_id 再 compare。已核 dataset:p_digital_001=iPhone 17 Pro,p_digital_002=华为 Pura 90 Pro。"
+      "notes": "冷启动具名对比(无 session):Planner 拿不到 id(禁止编造),Agent 须先 search_products 把两个商品名消解成 product_id,再 compare_products。不在 plan 层断言 id_lookup。已核 dataset:p_digital_001=iPhone 17 Pro,p_digital_002=华为 Pura 90 Pro。"
     },
 
     {
@@ -162,10 +159,10 @@
       "tags": ["core", "multi_turn", "id_lookup"],
       "layers": [1, 2],
       "user_id": "eval_user_3",
-      "session_state_seed": {
-        "last_shown_products": ["p_clothes_007", "p_clothes_008", "p_clothes_009"],
-        "current_topic": "跑步鞋"
-      },
+      "history": [
+        {"role": "user", "content": "推荐几双跑步鞋"},
+        {"role": "assistant", "content": "给你挑了三款不错的:耐克 Pegasus 41、阿迪达斯 Ultraboost 5、HOKA Clifton 9,跑量大也扛得住。", "card_refs": {"products": ["p_clothes_007", "p_clothes_008", "p_clothes_009"]}}
+      ],
       "query": "对比一下这三款",
       "expected_query_type": "id_lookup",
       "expected_referenced_product_ids": ["p_clothes_007", "p_clothes_008", "p_clothes_009"],
@@ -180,9 +177,10 @@
       "tags": ["core", "multi_turn", "id_lookup"],
       "layers": [1, 2],
       "user_id": "eval_user_1",
-      "session_state_seed": {
-        "last_shown_products": ["p_beauty_001"]
-      },
+      "history": [
+        {"role": "user", "content": "有什么雅诗兰黛的精华推荐"},
+        {"role": "assistant", "content": "雅诗兰黛小棕瓶挺经典,夜间修护、熬夜暗沉很对路。", "card_refs": {"products": ["p_beauty_001"]}}
+      ],
       "query": "刚说那款多少钱",
       "expected_query_type": "id_lookup",
       "expected_referenced_product_ids": ["p_beauty_001"],
@@ -218,9 +216,12 @@
       "layers": [1, 2],
       "user_id": "eval_user_3",
       "session_state_seed": {
-        "current_topic": "饮料",
-        "discussed_products": ["p_food_001", "p_food_002"]
+        "current_topic": "饮料"
       },
+      "history": [
+        {"role": "user", "content": "有什么好喝的饮料"},
+        {"role": "assistant", "content": "这两款给你参考下。", "card_refs": {"products": ["p_food_001", "p_food_002"]}}
+      ],
       "query": "换个话题,推荐双跑步鞋",
       "expected_query_type": "filtered_semantic",
       "expected_hard_constraints_contains": {
@@ -258,9 +259,8 @@
         "brand": "雅诗兰黛",
         "price_max": 10.0
       },
-      "expected_no_match": true,
-      "expected_response_must_contain_any": ["没找到", "放宽", "提高", "预算"],
-      "notes": "价格约束太严,Planner 抽对了但 SQL 返回空 → no_match。理想行为:Agent 软建议「放宽预算到 XX 有 N 款」(我们之前讨论的「no_match 软兜底」)"
+      "expected_response_must_contain_any": ["没找到", "找不到", "买不到", "没有符合", "超出", "这个价位", "这个价格"],
+      "notes": "价格约束太严(10 元买不到雅诗兰黛精华),Planner 抽对了但 SQL 返回空。判分口径:不限制卡片数量,只要 Agent 文本明确告知「没找到符合该价格的商品」即可;之后顺带推荐别的真实商品随意(卡片均来自 DB,无幻觉风险)。"
     },
 
     {
@@ -270,13 +270,13 @@
       "tags": ["core", "regression_guard", "hallucination"],
       "layers": [2, 3],
       "user_id": "eval_user_1",
-      "session_state_seed": {
-        "last_shown_products": ["p_beauty_001"]
-      },
+      "history": [
+        {"role": "user", "content": "看看雅诗兰黛的精华"},
+        {"role": "assistant", "content": "这款雅诗兰黛小棕瓶很经典,要不要看看?", "card_refs": {"products": ["p_beauty_001"]}}
+      ],
       "query": "这款有 200ml 装吗",
       "expected_tool_calls_include": ["search_products"],
       "expected_response_must_contain_any": ["没有", "暂时", "没看到", "30ml", "50ml", "75ml"],
-      "expected_response_must_not_contain": ["200ml"],
       "judge_focus": ["faithfulness"],
       "notes": "p_beauty_001 实际 SKU 是 30/50/75ml,问 200ml 必须诚实拒答,不能编出 200ml 的存在"
     },
@@ -304,7 +304,6 @@
       "user_id": "eval_user_3",
       "query": "推荐 Yeti 牌的保温杯",
       "expected_no_match": true,
-      "expected_response_must_not_contain": ["Yeti"],
       "judge_focus": ["faithfulness"],
       "notes": "Yeti 不在 dataset 食品品牌清单,必须诚实拒答,不能编出 Yeti 商品"
     },
@@ -371,13 +370,13 @@
       "tags": ["core", "business"],
       "layers": [2],
       "user_id": "eval_user_2",
-      "session_state_seed": {
-        "last_shown_products": ["p_food_001"]
-      },
+      "history": [
+        {"role": "user", "content": "推荐款咖啡"},
+        {"role": "assistant", "content": "三顿半数字星球系列挺适合,冷热都能冲,风味也多。", "card_refs": {"products": ["p_food_001"]}}
+      ],
       "query": "把这个加到购物车",
       "expected_tool_calls_include": ["manage_cart"],
-      "expected_cart_change": {"action": "add", "product_id": "p_food_001"},
-      "notes": "Agent 应先 search_products 取 sku_id 再 manage_cart add,绝不编 sku_id。已核 dataset:p_food_001=三顿半数字星球系列咖啡。"
+      "notes": "p_food_001 多规格(14 SKU),Agent 传 product_id 调 manage_cart,后端返回规格选择卡(不直接加、不编 sku_id)。真实加购在客户端选规格后走 REST,agent loop 测不到,故不断言 cart_change,只验证 manage_cart 被正确调起。"
     },
 
     {

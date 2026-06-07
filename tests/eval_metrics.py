@@ -27,6 +27,15 @@ class MetricResult:
     skipped: bool = False
 
 
+def _is_default(v: Any) -> bool:
+    """HardConstraints 的"未填"判定:None / 空 list / 空 dict。
+
+    bool False / 数字 0 视为"有值"(contains_alcohol=False 是"明确要无酒精",
+    不是缺省)。收紧 exact 匹配时用它识别 actual 里多出的非默认字段。
+    """
+    return v is None or v == [] or v == {}
+
+
 # ──────────────────────────────────────────────────────────────────────
 # L1:Planner 准确率
 # ──────────────────────────────────────────────────────────────────────
@@ -71,13 +80,20 @@ def planner_hard_constraints(
                     mismatches.append(f"{k}: expected={v}, actual={av}")
             elif av != v:
                 mismatches.append(f"{k}: expected={v!r}, actual={av!r}")
+        # 收紧:actual 不许有 expected 没列、且非默认的字段。
+        # 防"画像泄漏进 hard"类回归(如 gender 从画像渗进硬过滤),exact case
+        # 必须列全 Planner 该吐的字段;只想部分校验请用 expected_hard_constraints_contains。
+        for k, av in actual_dict.items():
+            if k in expected_full or _is_default(av):
+                continue
+            mismatches.append(f"多余字段 {k}={av!r}(期望未列,疑似泄漏)")
         if mismatches:
             return MetricResult(
                 "planner_hard_constraints",
                 False,
                 "; ".join(mismatches),
             )
-        return MetricResult("planner_hard_constraints", True, "exact match")
+        return MetricResult("planner_hard_constraints", True, "exact match (无多余字段)")
 
     # 部分匹配
     assert expected_partial is not None
@@ -122,6 +138,43 @@ def planner_referenced_ids(
         ok,
         f"expected count>={expected_count_min}, actual count={len(actual_ids)}",
     )
+
+
+def planner_soft_preferences(
+    actual: QueryPlan | None,
+    expected_contains: dict[str, Any] | None,
+) -> MetricResult:
+    """soft_preferences 部分匹配(宽松,对应 expected_soft_preferences_contains)。
+
+    哲学:soft 是开放词表、接受同义漂移(planner prompt #6),所以只查"包含"不查精确:
+    expected 里每个 key 必须存在,且其每个值要能在 actual 对应项里**双向子串**命中
+    (如 expected "保湿" 命中 actual "长效保湿")。这样能锁住"画像偏好软化"这条新行为
+    (skin/fragrance 该落在 soft 而非 hard),又不会因近义词写法不同而误判。
+    """
+    if expected_contains is None:
+        return MetricResult(
+            "planner_soft_preferences", True, "no expectation", skipped=True
+        )
+    if actual is None:
+        return MetricResult("planner_soft_preferences", False, "actual plan is None")
+
+    soft = actual.soft_preferences or {}
+    issues: list[str] = []
+    for key, exp_vals in expected_contains.items():
+        if key not in soft:
+            issues.append(f"缺 key {key!r}")
+            continue
+        act_raw = soft[key]
+        act_list = act_raw if isinstance(act_raw, list) else [act_raw]
+        act_str = [str(a) for a in act_list]
+        exp_list = exp_vals if isinstance(exp_vals, list) else [exp_vals]
+        for ev in exp_list:
+            ev_s = str(ev)
+            if not any(ev_s in a or a in ev_s for a in act_str):
+                issues.append(f"{key}: {ev_s!r} 不在 {act_str}")
+    if issues:
+        return MetricResult("planner_soft_preferences", False, "; ".join(issues))
+    return MetricResult("planner_soft_preferences", True, "soft prefs 全部命中")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -350,6 +403,9 @@ def compute_all_metrics(
             case.get("expected_referenced_count_min"),
         )
     )
+    results.append(
+        planner_soft_preferences(plan, case.get("expected_soft_preferences_contains"))
+    )
 
     # L2
     results.append(
@@ -387,6 +443,7 @@ __all__ = [
     "planner_query_type",
     "planner_hard_constraints",
     "planner_referenced_ids",
+    "planner_soft_preferences",
     "tool_sequence_match",
     "top_k_contains_ids",
     "top_k_excludes_brands",

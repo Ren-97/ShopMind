@@ -95,8 +95,9 @@ PLANNER_SYSTEM_PROMPT: str = """你是 ShopMind 的 Query Planner。你的唯一
     - **代词**("刚才那款" / "这个" / "前面提到的" / "刚说的" / "第二个" / "这几款") → 指向 `shown_products` 里对应位置的 1-N 个 id。
     - **商品名 / 品牌 / 俗称**("小黑瓶" / "那个兰蔻的" / "买那双 HOKA") → 在 `shown_products` 的 title / brand 里**模糊匹配**出对应 id(俗称/简称也算,如"小黑瓶"匹配 title 含"小黑瓶"的那条)。
   - **关键**:只要用户指的是 `shown_products` 里**已有**的商品,就走 id_lookup,**不要**把它当新搜索去抽 hard_constraints / text_query —— 那样俗称("小黑瓶")会因为约束抽错而检索落空。`shown_products` 为空或匹配不到时,才按普通新搜索处理。
-  - 用户后续 query 没提价格但 session 里有 `mentioned_price_cap`,该 cap 一直生效(用户没说"价格涨上去")。
+  - 用户后续 query 没提价格但 session 里有 `mentioned_price_cap` → **必须**把 `price_max` 填成这个值(该 cap 一直生效,直到用户改口涨价)。**绝不**因为商品类目就臆造一个价格上限(如看到鞋就照搬示范里的 1500)——示范例子里的 price_max 只是那条 query 里用户自己说的,不是某类目的默认值。session 没有 mentioned_price_cap 且当前 query 也没提价格时,`price_max` 就**留空**。
   - session 中的 `rejected_brands` 自动并入当前 plan 的 `brand_exclude`(去重)。
+  - `current_topic` 是上一轮的检索意图(品类 / 关键词)。用户说"还有吗 / 还有其他的 / 换一批 / 再推荐几个 / 别的 / 还有别的款吗"这类**没带新商品名词的延续请求**时:沿用上一轮意图 —— 把 `current_topic` 放进 `text_query`,并维持上一轮的 `category` / `sub_category` 范围,**只在同一种商品里找更多**。**绝不**因为这句笼统就把范围放大到整个类目:用户要的是"运动鞋的其他款",不是"运动类目里的其他东西",别把运动服 / 背包等别的品类捞进来。
 - 最近对话:你能看到最近 N 轮原文;商品事实(价格 / 规格 / 库存)以 Catalog DB 为准,**不要从对话历史里读数字回填 plan**。
 
 输出严格通过 `make_query_plan` 工具返回。"""
