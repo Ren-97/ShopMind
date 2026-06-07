@@ -24,6 +24,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -40,7 +42,7 @@ import kotlinx.coroutines.launch
  * 设计要点:
  *   - 单 session 心智:per user 一个持久 session_id(SessionStore),清空对话(🔄)只删 DB
  *   - 启动时拉 history → 批量并发拉 product/order → 拼成历史消息
- *   - 流式累积:`onTextDelta` 不断 append `streamingText`,done 时 flush 成 Assistant ChatMessage
+ *   - 流式累积:`onTextDelta` 把 delta 攒进缓冲,按帧刷进独立的 [streaming] 流,done 时 flush 成 Assistant ChatMessage
  *   - SSE 取消语义:发新消息前先 cancel 上一个 job
  */
 class ChatViewModel @JvmOverloads constructor(
@@ -58,7 +60,50 @@ class ChatViewModel @JvmOverloads constructor(
     )
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
+    /**
+     * 逐字流式内容(招2 隔离)。和 [state] 分开,只有正在生成的气泡订阅它,
+     * 每帧最多刷一次(见 [streamFlushJob])。
+     */
+    private val _streaming = MutableStateFlow(StreamingContent())
+    val streaming: StateFlow<StreamingContent> = _streaming.asStateFlow()
+
     private var activeJob: Job? = null
+
+    // ── 招1 节流:delta 先攒进非观察缓冲,按帧醒来的协程批量刷进 _streaming ──
+    // text / thinking delta 在主线程串行追加(SSE collect 跑在 viewModelScope=Main),
+    // flusher 也在 Main,故无并发,普通 StringBuilder 即可。
+    private val textBuf = StringBuilder()
+    private val thinkingBuf = StringBuilder()
+    private var streamDirty = false
+    private var streamFlushJob: Job? = null
+
+    /** 启动按帧刷新循环:有新字才写 _streaming,无字空转一帧 delay,turn 结束 [stopStreamFlusher] 关掉。 */
+    private fun startStreamFlusher() {
+        streamFlushJob?.cancel()
+        streamDirty = false
+        streamFlushJob = viewModelScope.launch {
+            while (isActive) {
+                delay(STREAM_FLUSH_INTERVAL_MS)
+                if (streamDirty) {
+                    streamDirty = false
+                    _streaming.value = StreamingContent(
+                        text = textBuf.toString(),
+                        thinking = thinkingBuf.toString(),
+                    )
+                }
+            }
+        }
+    }
+
+    /** 停掉刷新循环并清空缓冲 + 流式快照(turn 结束 / 切用户)。 */
+    private fun stopStreamFlusher() {
+        streamFlushJob?.cancel()
+        streamFlushJob = null
+        textBuf.setLength(0)
+        thinkingBuf.setLength(0)
+        streamDirty = false
+        _streaming.value = StreamingContent()
+    }
 
     init {
         loadUsers()
@@ -74,18 +119,18 @@ class ChatViewModel @JvmOverloads constructor(
         val query = text.trim()
         if (query.isEmpty() || _state.value.isLoading) return
 
+        stopStreamFlusher()
         _state.update { s ->
             s.copy(
                 messages = s.messages + ChatMessage.User(text = query),
                 isLoading = true,
-                streamingText = "",
-                streamingThinking = "",
                 streamingCards = emptyList(),
                 streamingSuggestions = emptyList(),
                 toolCallHint = null,
                 errorMsg = null,
             )
         }
+        startStreamFlusher()
 
         activeJob?.cancel()
         activeJob = viewModelScope.launch {
@@ -114,6 +159,7 @@ class ChatViewModel @JvmOverloads constructor(
         if (userId == _state.value.currentUserId) return
         HttpClients.setCurrentUser(userId)
         activeJob?.cancel()
+        stopStreamFlusher()
         val keepUsers = _state.value.availableUsers
         _state.value = ChatUiState(
             currentUserId = userId,
@@ -295,7 +341,9 @@ class ChatViewModel @JvmOverloads constructor(
     }
 
     internal fun onThinkingDelta(delta: String) {
-        _state.update { it.copy(streamingThinking = it.streamingThinking + delta) }
+        // 只追加缓冲 + 标脏,实际刷屏交给 startStreamFlusher 按帧批量做(招1)
+        thinkingBuf.append(delta)
+        streamDirty = true
     }
 
     internal fun onToolCall(name: String) {
@@ -360,7 +408,9 @@ class ChatViewModel @JvmOverloads constructor(
     }
 
     internal fun onTextDelta(delta: String) {
-        _state.update { it.copy(streamingText = it.streamingText + delta) }
+        // 同 onThinkingDelta:攒进缓冲,按帧刷(招1)
+        textBuf.append(delta)
+        streamDirty = true
     }
 
     internal fun onSuggestions(items: List<SuggestionItem>) {
@@ -379,20 +429,22 @@ class ChatViewModel @JvmOverloads constructor(
     // 内部
     // ──────────────────────────────────────────────────────────
     private fun flushTurn() {
+        // 缓冲是最终文本的真相源(节流快照可能差一帧),先取出再停 flusher 清空
+        val finalText = textBuf.toString()
+        val finalThinking = thinkingBuf.toString()
+        stopStreamFlusher()
         _state.update { s ->
             val assistantMsg = ChatMessage.Assistant(
-                text = s.streamingText,
+                text = finalText,
                 cards = s.streamingCards,
                 suggestions = s.streamingSuggestions,
-                thinking = s.streamingThinking,
+                thinking = finalThinking,
             )
             val hasAnyContent = assistantMsg.text.isNotEmpty() ||
                 assistantMsg.cards.isNotEmpty() ||
                 assistantMsg.suggestions.isNotEmpty()
             s.copy(
                 messages = if (hasAnyContent) s.messages + assistantMsg else s.messages,
-                streamingText = "",
-                streamingThinking = "",
                 streamingCards = emptyList(),
                 streamingSuggestions = emptyList(),
                 toolCallHint = null,
@@ -402,6 +454,10 @@ class ChatViewModel @JvmOverloads constructor(
     }
 
     companion object {
+        // 流式刷屏节流间隔(招1):~30fps。把后端忽快忽慢的 delta 节奏削成稳定帧率,
+        // 肉眼仍是逐字冒出,但屏幕每秒最多刷 ~30 次而非跟着 token 数狂刷。
+        private const val STREAM_FLUSH_INTERVAL_MS = 33L
+
         // V1 hardcoded display names — V2 改为调 GET /users 真实映射
         private val DEMO_DISPLAY_NAMES: Map<String, String> = mapOf(
             "demo_user_1" to "Alice",

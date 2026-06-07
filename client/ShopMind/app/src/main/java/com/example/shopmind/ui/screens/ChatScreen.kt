@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -87,9 +88,17 @@ fun ChatScreen(
         vm.refreshStarterChips()
     }
 
-    LaunchedEffect(state.messages.size, state.streamingText.length, state.isLoading) {
-        val targetIndex = state.messages.size + (if (state.isLoading) 1 else 0) - 1
-        if (targetIndex >= 0) listState.animateScrollToItem(targetIndex.coerceAtLeast(0))
+    // 招3 自动滚动 —— 只在消息边界(用户发送 / 助手收尾)触发,不再跟着每个 token 重启动画。
+    // 用户刚发的消息一定滚到底;助手收尾消息只在用户仍停在底部时才滚(翻看历史时不抢手)。
+    // 流式逐字增长期间的"跟随滚动"由 StreamingAssistantBubble 内部按帧做(同样仅在底部跟随)。
+    LaunchedEffect(state.messages.size, state.isLoading) {
+        val msgs = state.messages
+        if (msgs.isEmpty()) return@LaunchedEffect
+        val lastIsUser = msgs.last() is ChatMessage.User
+        if (lastIsUser || listState.isAtBottom()) {
+            val targetIndex = msgs.size + (if (state.isLoading) 1 else 0) - 1
+            listState.animateScrollToItem(targetIndex.coerceAtLeast(0), SCROLL_TO_BOTTOM_OFFSET)
+        }
     }
 
     LaunchedEffect(state.errorMsg) {
@@ -257,13 +266,13 @@ fun ChatScreen(
             }
             if (state.isLoading) {
                 item(key = "__streaming__") {
-                    AssistantBubble(
-                        text = state.streamingText,
+                    StreamingAssistantBubble(
+                        vm = vm,
+                        listState = listState,
+                        itemIndex = state.messages.size,
                         cards = state.streamingCards,
                         suggestions = state.streamingSuggestions,
-                        thinking = state.streamingThinking,
                         toolCallHint = state.toolCallHint,
-                        showSpinnerIfNothing = true,
                         onProductClick = onProductClick,
                         onCartClick = onCartClick,
                         onCheckoutClick = onCheckoutClick,
@@ -477,6 +486,59 @@ private fun AssistantBubble(
         }
     }
 }
+
+/**
+ * 流式气泡(招2 隔离 + 招3 跟随)。
+ *
+ * 内部订阅 [ChatViewModel.streaming](逐字内容),token 更新只重组本组件,不牵连 ChatScreen
+ * 顶栏 / 已凝固消息列表。每帧内容变化时,若用户仍停在底部则瞬时贴底(scrollToItem,无动画),
+ * 用户上翻看历史则不滚 —— 不和手势抢。卡片 / suggestions / toolCallHint 走 [ChatUiState](低频)。
+ */
+@Composable
+private fun StreamingAssistantBubble(
+    vm: ChatViewModel,
+    listState: LazyListState,
+    itemIndex: Int,
+    cards: List<CardData>,
+    suggestions: List<SuggestionItem>,
+    toolCallHint: String?,
+    onProductClick: (String) -> Unit,
+    onCartClick: () -> Unit,
+    onCheckoutClick: () -> Unit,
+    onSkuAdd: (skuId: String, title: String, qty: Int) -> Unit,
+    onSuggestionClick: (SuggestionItem) -> Unit,
+) {
+    val streaming by vm.streaming.collectAsState()
+    LaunchedEffect(streaming.text, streaming.thinking, cards.size) {
+        if (listState.isAtBottom()) {
+            listState.scrollToItem(itemIndex, SCROLL_TO_BOTTOM_OFFSET)
+        }
+    }
+    AssistantBubble(
+        text = streaming.text,
+        cards = cards,
+        suggestions = suggestions,
+        thinking = streaming.thinking,
+        toolCallHint = toolCallHint,
+        showSpinnerIfNothing = true,
+        onProductClick = onProductClick,
+        onCartClick = onCartClick,
+        onCheckoutClick = onCheckoutClick,
+        onSkuAdd = onSkuAdd,
+        onSuggestionClick = onSuggestionClick,
+    )
+}
+
+/** 用户是否仍停在列表底部(末项可见)。流式跟随 / 收尾滚动据此决定滚不滚(招3)。 */
+private fun LazyListState.isAtBottom(): Boolean {
+    val info = layoutInfo
+    val last = info.visibleItemsInfo.lastOrNull() ?: return true
+    return last.index >= info.totalItemsCount - 1
+}
+
+// 滚到末项时附带的大像素偏移,把最后一项的底部贴到视口底部(否则 scrollToItem 只对齐顶部,
+// 长回答会把最新文字顶出屏幕)。LazyList 会自动 clamp,取个足够大的值即可。
+private const val SCROLL_TO_BOTTOM_OFFSET = 100_000
 
 @Composable
 private fun ChatInputBar(
