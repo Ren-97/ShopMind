@@ -12,11 +12,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -24,6 +26,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
@@ -62,6 +65,7 @@ import com.example.shopmind.domain.CardData
 import com.example.shopmind.domain.ChatMessage
 import com.example.shopmind.domain.SuggestionItem
 import com.example.shopmind.ui.components.CardListRenderer
+import com.example.shopmind.ui.components.parseInlineBold
 import com.example.shopmind.ui.components.rendersBelowText
 import com.example.shopmind.ui.components.SuggestionChips
 import com.example.shopmind.ui.components.ThinkingBubble
@@ -224,7 +228,8 @@ fun ChatScreen(
                     inputText = ""
                     vm.sendMessage(toSend)
                 },
-                enabled = !state.isLoading,
+                onStop = { vm.cancelStreaming() },
+                isStreaming = state.isLoading,
             )
         },
         snackbarHost = { SnackbarHost(snackbarHost) },
@@ -386,11 +391,13 @@ private fun UserBubble(text: String) {
             color = MaterialTheme.colorScheme.primaryContainer,
             modifier = Modifier.padding(start = 48.dp),
         ) {
-            Text(
-                text = text,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
+            SelectionContainer {
+                Text(
+                    text = text,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
         }
     }
 }
@@ -439,31 +446,23 @@ private fun AssistantBubble(
             )
         }
         when {
+            // 助手消息不套气泡(B2/b,ChatGPT 风):整行左对齐铺开,正文中性色,更清爽、也更衬卡片。
+            // 用户消息仍是主色气泡靠右,左右分明。
             text.isNotEmpty() -> {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.padding(end = 48.dp),
-                ) {
+                SelectionContainer {
                     Text(
-                        text = text,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        text = parseInlineBold(text),
+                        modifier = Modifier.padding(end = 12.dp),
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }
             showSpinnerIfNothing && cards.isEmpty() && thinking.isEmpty() -> {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.padding(end = 48.dp),
-                ) {
-                    Box(
-                        modifier = Modifier.padding(14.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(strokeWidth = 2.dp)
-                    }
+                Box(modifier = Modifier.padding(vertical = 4.dp)) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
             }
         }
@@ -545,7 +544,8 @@ private fun ChatInputBar(
     value: String,
     onValueChange: (String) -> Unit,
     onSend: () -> Unit,
-    enabled: Boolean,
+    onStop: () -> Unit,
+    isStreaming: Boolean,
 ) {
     Surface(tonalElevation = 3.dp) {
         Row(
@@ -560,12 +560,19 @@ private fun ChatInputBar(
                 onValueChange = onValueChange,
                 placeholder = { Text("说点什么...") },
                 modifier = Modifier.weight(1f),
-                enabled = enabled,
+                enabled = !isStreaming,
                 singleLine = false,
                 maxLines = 4,
             )
-            IconButton(onClick = onSend, enabled = enabled && value.isNotBlank()) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+            // 生成中:发送键变"停止"键,点一下丢弃当轮(大厂做法);否则正常发送
+            if (isStreaming) {
+                IconButton(onClick = onStop) {
+                    Icon(Icons.Default.Stop, contentDescription = "停止生成")
+                }
+            } else {
+                IconButton(onClick = onSend, enabled = value.isNotBlank()) {
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+                }
             }
         }
     }

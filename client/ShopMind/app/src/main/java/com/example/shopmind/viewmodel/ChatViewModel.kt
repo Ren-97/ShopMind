@@ -1,6 +1,7 @@
 package com.example.shopmind.viewmodel
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.shopmind.domain.CardData
@@ -145,6 +146,28 @@ class ChatViewModel @JvmOverloads constructor(
                 }
                 .collect()
         }
+    }
+
+    /**
+     * 用户点"停止生成":整条当轮回复**直接丢弃**,不落地。
+     *
+     * 顺序要紧:先置 isLoading=false + 清流式态,再 cancel —— 这样被取消 job 的 onCompletion
+     * 里 `if (isLoading) flushTurn()` 判 false、跳过 flush,半截文字不会凝固成消息。
+     * 后端那侧:客户端断开后 orchestrator 在下一个 yield 处被 cancel,走不到末尾的持久化,
+     * 故这轮也不会进 DB(已执行过的有副作用工具如加购不回滚 —— 但搜索/推荐只读,无影响)。
+     */
+    fun cancelStreaming() {
+        if (!_state.value.isLoading) return
+        _state.update {
+            it.copy(
+                isLoading = false,
+                streamingCards = emptyList(),
+                streamingSuggestions = emptyList(),
+                toolCallHint = null,
+            )
+        }
+        stopStreamFlusher()
+        activeJob?.cancel()
     }
 
     fun consumeError() {
@@ -422,7 +445,9 @@ class ChatViewModel @JvmOverloads constructor(
     }
 
     internal fun onError(code: String, message: String) {
-        _state.update { it.copy(errorMsg = "[$code] $message") }
+        // 内部 code / 原始 message 只进 logcat 供调试;用户只看人话(demo 阶段一刀切通用文案)
+        Log.w("ChatViewModel", "agent_error code=$code msg=$message")
+        _state.update { it.copy(errorMsg = "出了点问题,请稍后重试") }
     }
 
     // ──────────────────────────────────────────────────────────

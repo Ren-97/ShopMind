@@ -89,7 +89,8 @@
       "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; & .\\\\client\\\\ShopMind\\\\gradlew.bat -p client\\\\ShopMind compileDebugKotlin --console=plain)",
       "Bash(py -c \"import json; d=json.load\\(open\\('tests/eval_cases.json',encoding='utf-8'\\)\\); print\\('cases:', len\\(d['cases']\\)\\); print\\('with history:', sum\\(1 for c in d['cases'] if c.get\\('history'\\)\\)\\); print\\('with session_seed:', [c['id'] for c in d['cases'] if c.get\\('session_state_seed'\\)]\\)\")",
       "Bash(py -m py_compile tests/eval_runner.py)",
-      "Bash(JAVA_HOME=\"/c/Program Files/Android/Android Studio/jbr\" ./gradlew compileDebugKotlin -q)"
+      "Bash(JAVA_HOME=\"/c/Program Files/Android/Android Studio/jbr\" ./gradlew compileDebugKotlin -q)",
+      "PowerShell(Add-Type -AssemblyName System.Drawing; $dirs = Get-ChildItem dataset\\\\ecommerce_agent_dataset -Directory; foreach \\($d in $dirs\\) { $imgs = Get-ChildItem \\(Join-Path $d.FullName 'images'\\) -File -ErrorAction SilentlyContinue | Select-Object -First 3; foreach \\($f in $imgs\\) { try { $img = [System.Drawing.Image]::FromFile\\($f.FullName\\); \"{0}: {1}x{2}\" -f $f.Name, $img.Width, $img.Height; $img.Dispose\\(\\) } catch {} } })"
     ]
   }
 }
