@@ -1,5 +1,7 @@
 package com.example.shopmind.ui.components
 
+import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +23,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,6 +44,8 @@ fun OrderCard(
     data: OrderCardData,
     modifier: Modifier = Modifier,
 ) {
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     OutlinedCard(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -50,11 +57,17 @@ fun OrderCard(
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                 )
+                // 点订单号复制完整 orderId(展示用 shortenOrderId 截断,复制取原值)
                 Text(
                     "订单 ${shortenOrderId(data.orderId)}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(start = 8.dp),
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .clickable {
+                            clipboard.setText(AnnotatedString(data.orderId))
+                            Toast.makeText(context, "已复制订单号", Toast.LENGTH_SHORT).show()
+                        },
                 )
                 StatusChip(status = data.status, modifier = Modifier.padding(start = 8.dp))
             }

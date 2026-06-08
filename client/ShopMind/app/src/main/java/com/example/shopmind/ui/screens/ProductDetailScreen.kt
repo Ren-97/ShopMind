@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -238,8 +239,11 @@ private fun DetailBody(
 ) {
     var faqsExpanded by remember { mutableStateOf(false) }
     var reviewsExpanded by remember { mutableStateOf(false) }
+    // 整页文本包一层 SelectionContainer:长按可选中复制(规格 / 介绍 / FAQ / 评论)。
+    // 规格 chip、查看全部按钮的点击不受影响,只是额外支持长按选字。
+    SelectionContainer(modifier = modifier) {
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -335,12 +339,12 @@ private fun DetailBody(
                 ) {
                     Text(
                         "Q: ${faq.question}",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
                         "A: ${faq.answer}",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -392,7 +396,7 @@ private fun DetailBody(
                             modifier = Modifier.padding(start = 6.dp),
                         )
                     }
-                    Text(r.content, style = MaterialTheme.typography.bodySmall)
+                    Text(r.content, style = MaterialTheme.typography.bodyMedium)
                 }
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
@@ -407,6 +411,7 @@ private fun DetailBody(
                 }
             }
         }
+    }
     }
 }
 
@@ -473,14 +478,26 @@ private fun ReviewSummaryCard(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                "大家怎么说 · AI 摘要自 $reviewCount 条评论",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // 「大家怎么说」是主标题,AI 出处弱化成右侧小灰字角标,降低"AI 感"
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "大家怎么说",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "AI 摘要自 $reviewCount 条评论",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+            }
             highlights?.takeIf { it.isNotBlank() }?.let {
-                SummaryRow(label = "优点", labelColor = Color(0xFF2E7D32), text = it)
+                SummaryRow(label = "亮点", labelColor = Color(0xFF2E7D32), text = it)
             }
             caveats?.takeIf { it.isNotBlank() }?.let {
                 SummaryRow(label = "注意", labelColor = Color(0xFFEF6C00), text = it)
@@ -506,7 +523,7 @@ private fun SummaryRow(label: String, labelColor: Color, text: String) {
         }
         Text(
             text,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
