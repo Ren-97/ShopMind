@@ -75,20 +75,35 @@ class ChatViewModel @JvmOverloads constructor(
     // flusher 也在 Main,故无并发,普通 StringBuilder 即可。
     private val textBuf = StringBuilder()
     private val thinkingBuf = StringBuilder()
-    private var streamDirty = false
     private var streamFlushJob: Job? = null
 
-    /** 启动按帧刷新循环:有新字才写 _streaming,无字空转一帧 delay,turn 结束 [stopStreamFlusher] 关掉。 */
+    // 打字机游标:缓冲被 SSE 快速填满,但屏幕每帧只从 revealedLen 往前推进一小段,
+    // 把 Anthropic/SSE 的突发节奏(停顿→蹦一串)削成平滑逐字冒出。done 时一次性补齐。
+    private var revealedLen = 0
+    private var flushedThinkingLen = 0
+
+    /**
+     * 启动按帧打字机循环:每帧把 [revealedLen] 朝 textBuf 末尾推进一小段(缓出 —— 落后越多推进越快,
+     * 突发能很快追上但不蹦串),已追平则空转。thinking 不走游标(低频、可全量)。turn 结束 [stopStreamFlusher] 关掉。
+     */
     private fun startStreamFlusher() {
         streamFlushJob?.cancel()
-        streamDirty = false
+        revealedLen = 0
+        flushedThinkingLen = 0
         streamFlushJob = viewModelScope.launch {
             while (isActive) {
                 delay(STREAM_FLUSH_INTERVAL_MS)
-                if (streamDirty) {
-                    streamDirty = false
+                val target = textBuf.length
+                val thinkingGrew = thinkingBuf.length != flushedThinkingLen
+                if (revealedLen < target || thinkingGrew) {
+                    if (revealedLen < target) {
+                        val pending = target - revealedLen
+                        val step = maxOf(STREAM_REVEAL_MIN_CHARS, (pending * STREAM_REVEAL_FACTOR).toInt())
+                        revealedLen = minOf(target, revealedLen + step)
+                    }
+                    flushedThinkingLen = thinkingBuf.length
                     _streaming.value = StreamingContent(
-                        text = textBuf.toString(),
+                        text = textBuf.substring(0, revealedLen),
                         thinking = thinkingBuf.toString(),
                     )
                 }
@@ -96,13 +111,14 @@ class ChatViewModel @JvmOverloads constructor(
         }
     }
 
-    /** 停掉刷新循环并清空缓冲 + 流式快照(turn 结束 / 切用户)。 */
+    /** 停掉刷新循环并清空缓冲 + 游标 + 流式快照(turn 结束 / 切用户)。 */
     private fun stopStreamFlusher() {
         streamFlushJob?.cancel()
         streamFlushJob = null
         textBuf.setLength(0)
         thinkingBuf.setLength(0)
-        streamDirty = false
+        revealedLen = 0
+        flushedThinkingLen = 0
         _streaming.value = StreamingContent()
     }
 
@@ -364,9 +380,8 @@ class ChatViewModel @JvmOverloads constructor(
     }
 
     internal fun onThinkingDelta(delta: String) {
-        // 只追加缓冲 + 标脏,实际刷屏交给 startStreamFlusher 按帧批量做(招1)
+        // 只追加缓冲,实际刷屏交给 startStreamFlusher 按帧做(招1)
         thinkingBuf.append(delta)
-        streamDirty = true
     }
 
     internal fun onToolCall(name: String) {
@@ -431,9 +446,8 @@ class ChatViewModel @JvmOverloads constructor(
     }
 
     internal fun onTextDelta(delta: String) {
-        // 同 onThinkingDelta:攒进缓冲,按帧刷(招1)
+        // 同 onThinkingDelta:攒进缓冲,按帧打字机推进(招1)
         textBuf.append(delta)
-        streamDirty = true
     }
 
     internal fun onSuggestions(items: List<SuggestionItem>) {
@@ -479,9 +493,13 @@ class ChatViewModel @JvmOverloads constructor(
     }
 
     companion object {
-        // 流式刷屏节流间隔(招1):~30fps。把后端忽快忽慢的 delta 节奏削成稳定帧率,
-        // 肉眼仍是逐字冒出,但屏幕每秒最多刷 ~30 次而非跟着 token 数狂刷。
+        // 流式刷屏节流间隔(招1):~30fps。打字机游标按这个帧率推进。
         private const val STREAM_FLUSH_INTERVAL_MS = 33L
+
+        // 打字机推进参数(真机手感调,eval 不覆盖 UI):每帧推进 = max(MIN, pending * FACTOR)。
+        // FACTOR 缓出 —— 落后越多推进越快,突发能很快追上;MIN 保证就算只差几个字也持续逐字冒出。
+        private const val STREAM_REVEAL_FACTOR = 0.3
+        private const val STREAM_REVEAL_MIN_CHARS = 2
 
         // V1 hardcoded display names — V2 改为调 GET /users 真实映射
         private val DEMO_DISPLAY_NAMES: Map<String, String> = mapOf(

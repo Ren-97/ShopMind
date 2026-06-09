@@ -7,7 +7,7 @@ ShopMind 集中配置(对应 docs/design.md §4.9)。
 加载顺序:
   1. 进程启动时 python-dotenv 加载根目录 `.env`(若存在)
   2. 模块级常量从 os.getenv 读敏感字段(默认 None,缺失时业务层报错)
-  3. 路径默认指向 `dataset/sample/`(样品间),通过 .env 覆盖切到全量
+  3. 路径默认指向 `dataset/ecommerce_agent_dataset/`(全量),通过 .env 覆盖切其它
 """
 
 from __future__ import annotations
@@ -139,11 +139,11 @@ TEST_DATABASE_URL: str = _env(
 
 # ─────────────────────────────────────────────────────────────
 # 基础设施 / 数据路径
-# 设计偏离:默认指向 dataset/sample/(只读样品间),切全量改 .env
+# 默认指向 dataset/ecommerce_agent_dataset/(全量),切其它数据集改 .env
 # ─────────────────────────────────────────────────────────────
 QDRANT_PATH: str = _env("QDRANT_PATH", "./data/qdrant_storage/")
-INGEST_DATASET_DIR: str = _env("INGEST_DATASET_DIR", "./dataset/sample/")
-STATIC_FILES_DIR: str = _env("STATIC_FILES_DIR", "./dataset/sample/")
+INGEST_DATASET_DIR: str = _env("INGEST_DATASET_DIR", "./dataset/ecommerce_agent_dataset/")
+STATIC_FILES_DIR: str = _env("STATIC_FILES_DIR", "./dataset/ecommerce_agent_dataset/")
 
 BASE_URL: str = _env("BASE_URL", "http://localhost:8000")
 

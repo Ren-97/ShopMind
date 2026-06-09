@@ -62,6 +62,8 @@ class VectorIndex:
             sparse_vectors_config={
                 "sparse": qmodels.SparseVectorParams(
                     index=qmodels.SparseIndexParams(on_disk=False),
+                    # fastembed BM25 不编 IDF,靠 Qdrant 查询时按当前库统计补算
+                    modifier=qmodels.Modifier.IDF,
                 ),
             },
         )

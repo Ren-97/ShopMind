@@ -148,6 +148,9 @@ class Orchestrator:
         all_tool_results: list[tuple[str, ToolResult]] = []
         last_plan: QueryPlan | None = None  # 由 search_products tool 通过 result.meta 回传
         assistant_text_accum: list[str] = []
+        # suggestions 累积:跨所有 round 收集,等全部文字流完(loop 结束)再一次性 emit。
+        # 否则会在「调 tool 的那一轮(文字还没流出来)」就发出去,客户端表现成 卡→chips→文字。
+        pending_suggestions: list[dict[str, Any]] = []
 
         finish_reason = "stop"
 
@@ -188,18 +191,13 @@ class Orchestrator:
                     registry=self._registry,
                 )
                 tool_results_for_round.append((block.name, result, block))
-                # SSE 副作用:cards 立刻 emit;suggestions 等本轮所有 tool 跑完一起 emit
+                # SSE 副作用:cards 立刻 emit(排在文字上方);suggestions 攒到 turn 末尾再发
                 for card in result.cards:
                     yield AgentEvent(type="card", data=card)
 
-            # suggestions:把同一轮的全部 suggestions 合并成一条 event(§4.6.11)
-            merged_suggestions: list[dict[str, Any]] = []
+            # suggestions:本轮的先攒着,不立刻 emit(见 pending_suggestions 注释)
             for _name, result, _block in tool_results_for_round:
-                merged_suggestions.extend(result.suggestions)
-            if merged_suggestions:
-                yield AgentEvent(
-                    type="suggestions", data={"items": merged_suggestions}
-                )
+                pending_suggestions.extend(result.suggestions)
 
             # 累积进 session_state 用 + 提取 search 回传的 plan
             for name, r, _ in tool_results_for_round:
@@ -233,6 +231,11 @@ class Orchestrator:
             assistant_text_accum.append(fallback)
             yield AgentEvent(type="text", data={"delta": fallback})
             finish_reason = "max_turns"
+
+        # suggestions 统一在所有文字流完后 emit(§4.6.11)——
+        # 保证客户端到达顺序是 卡片 → 文字 → chips,chip 不会在答复文字前先蹦出来
+        if pending_suggestions:
+            yield AgentEvent(type="suggestions", data={"items": pending_suggestions})
 
         # ── 收尾 ──
         update_session_state_after_turn(

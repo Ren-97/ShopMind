@@ -18,7 +18,7 @@ def aggregate_chunks_to_products(
 ) -> list[ProductHit]:
     """按 product_id group → max score 排序 → 取 top_n。
 
-    - `coarse_threshold` 过滤全零分粗排噪声(§4.1.11 + §4.3),0 时不过滤
+    - `coarse_threshold` 过滤融合分极低的尾部噪声 chunk(送 LLM 重排前的成本兜底),0 时不过滤
     - 保留 chunk 出现顺序(Qdrant 已按融合分排序),便于后续按 chunk_type 加权
     """
     by_product: dict[str, ProductHit] = {}

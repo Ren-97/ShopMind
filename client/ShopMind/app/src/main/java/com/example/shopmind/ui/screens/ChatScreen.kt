@@ -449,9 +449,11 @@ private fun AssistantBubble(
             // 助手消息不套气泡(B2/b,ChatGPT 风):整行左对齐铺开,正文中性色,更清爽、也更衬卡片。
             // 用户消息仍是主色气泡靠右,左右分明。
             text.isNotEmpty() -> {
+                // 流式逐字时每帧 text 变,parseInlineBold 较重 —— 按 text 记忆,只在内容变时重算
+                val annotated = remember(text) { parseInlineBold(text) }
                 SelectionContainer {
                     Text(
-                        text = parseInlineBold(text),
+                        text = annotated,
                         modifier = Modifier.padding(end = 12.dp),
                         color = MaterialTheme.colorScheme.onSurface,
                     )
