@@ -84,7 +84,6 @@
 - ❌ **手写 retry 循环**:Anthropic SDK 已内置 `max_retries=2`
 - ❌ **构造"降级 plan"**:Planner Hard Fail → 直接返回兜底文案,不构造误导性结果
 - ❌ **跨用户访问数据**:所有用户态查询带 `user_id` filter,严防越权
-- ❌ **跳过 eval**:写完一个组件就跑一次 `tests/eval.py`,数据驱动调优
 - ❌ **过度抽象未来不会发生的事**:V2 升级路径写在文档作 talking point,不在 V1 实施
 - ❌ **在 SSE 流里推完整 product 数据**:Card 是 lean schema,详情走 `/product/{id}` REST(§4.6)
 - ❌ **跨 SQL + Qdrant 写没考虑幂等**:SQL 用 UPSERT,Qdrant 用同 chunk_id 覆盖

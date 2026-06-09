@@ -43,11 +43,8 @@ logs/
 *.dump
 
 # Datasets
-dataset/sample_dataset/
-
-# 私有文档 / 草稿(用户既有意图,保留)
-docs/
-topic info/
+dataset/sample/
+dataset/sample/**
 
 # IDE / Editor
 .idea/
