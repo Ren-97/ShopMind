@@ -107,7 +107,8 @@
       "Bash(git *)",
       "Bash(py /tmp/diagram.py)",
       "PowerShell($p = \\(Get-Command python -ErrorAction SilentlyContinue\\); if\\($p\\){$p.Source}; $p2=\\(Get-Command py -ErrorAction SilentlyContinue\\); if\\($p2\\){$p2.Source}; \\(Get-Command uv -ErrorAction SilentlyContinue\\).Source)",
-      "PowerShell($mmdc = \\(Get-Command mmdc -ErrorAction SilentlyContinue\\); if\\($mmdc\\){\"mmdc: $\\($mmdc.Source\\)\"}else{\"mmdc: no\"}; $npx=\\(Get-Command npx -ErrorAction SilentlyContinue\\); if\\($npx\\){\"npx: $\\($npx.Source\\)\"}else{\"npx: no\"}; $node=\\(Get-Command node -ErrorAction SilentlyContinue\\); if\\($node\\){\"node: $\\(node -v\\)\"}else{\"node: no\"})"
+      "PowerShell($mmdc = \\(Get-Command mmdc -ErrorAction SilentlyContinue\\); if\\($mmdc\\){\"mmdc: $\\($mmdc.Source\\)\"}else{\"mmdc: no\"}; $npx=\\(Get-Command npx -ErrorAction SilentlyContinue\\); if\\($npx\\){\"npx: $\\($npx.Source\\)\"}else{\"npx: no\"}; $node=\\(Get-Command node -ErrorAction SilentlyContinue\\); if\\($node\\){\"node: $\\(node -v\\)\"}else{\"node: no\"})",
+      "PowerShell($jbr = \"$env:LOCALAPPDATA\\\\Programs\\\\Android Studio\\\\jbr\"; if \\(-not \\(Test-Path $jbr\\)\\) { $jbr = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\" }; $env:JAVA_HOME = $jbr; & \"d:\\\\ShopMind\\\\client\\\\ShopMind\\\\gradlew.bat\" -p \"d:\\\\ShopMind\\\\client\\\\ShopMind\" compileDebugKotlin -q)"
     ]
   }
 }

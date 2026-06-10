@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from server import config
@@ -68,8 +70,11 @@ class FilteredSemanticStrategy:
             return RetrievalResult(products=products, strategy=self.name)
 
         # ── 2) 编码 query(dense + sparse 并行) ──
-        dense_vec = await self._embedder.embed_query(text)
-        sparse_vecs = await self._sparse_encoder.encode([text])
+        # dense 是 embedding provider 网络往返、sparse 是本地 BM25,两者独立 → gather 并发
+        dense_vec, sparse_vecs = await asyncio.gather(
+            self._embedder.embed_query(text),
+            self._sparse_encoder.encode([text]),
+        )
         sparse_vec = sparse_vecs[0]
 
         # ── 3) Hybrid 检索(Qdrant 原生 RRF + 白名单 filter) ──

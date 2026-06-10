@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from server import config
 from server.domain.types import QueryPlan, RetrievalResult
 from server.rag.embedders.protocol import Embedder
@@ -42,8 +44,11 @@ class PureSemanticStrategy:
             # Pure Semantic 没有 text 没法做,返回空走 no_match
             return RetrievalResult(products=[], strategy=self.name)
 
-        dense_vec = await self._embedder.embed_query(text)
-        sparse_vecs = await self._sparse_encoder.encode([text])
+        # dense + sparse 并行:dense 是网络往返、sparse 是本地 BM25,两者独立
+        dense_vec, sparse_vecs = await asyncio.gather(
+            self._embedder.embed_query(text),
+            self._sparse_encoder.encode([text]),
+        )
         sparse_vec = sparse_vecs[0]
 
         chunks = await self._vector_index.hybrid_search(

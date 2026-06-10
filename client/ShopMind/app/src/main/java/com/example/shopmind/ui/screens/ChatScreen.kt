@@ -460,11 +460,24 @@ private fun AssistantBubble(
                 }
             }
             showSpinnerIfNothing && cards.isEmpty() && thinking.isEmpty() -> {
-                Box(modifier = Modifier.padding(vertical = 4.dp)) {
+                // 首事件到达前的空窗(extract + 主对话第 1 轮决定调工具):转圈配一句话,
+                // 别让用户对着无字 spinner 干等。tool_call 一到,上方 toolCallHint 接管更具体的文案。
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
+                ) {
                     CircularProgressIndicator(
                         strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(16.dp),
                     )
+                    if (toolCallHint == null) {
+                        Text(
+                            "正在思考…",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
