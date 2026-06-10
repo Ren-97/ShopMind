@@ -367,13 +367,12 @@ class EvalRunner:
     ) -> QueryPlan:
         """单独跑 Planner(L1 metric 用),不依赖 Orchestrator 内部 plan 提取。"""
         assert self._session_store is not None
-        profile = await self._read_profile(user_id)
         session_state = self._session_store.get(session_id).render_for_planner()
+        # 与生产一致:Planner **不收 profile**(画像走后端代码合并 + reranker,不进 plan)。
         # recent_turns 留空 — eval 场景 history 已经 inject 进 chat_history,
         # 但 Planner 在 search tool 里拿 recent_turns,L1 stand-alone 这里简化处理
         plan = await plan_query(
             query,
-            profile=profile,
             session_state=session_state,
             recent_turns=None,
         )

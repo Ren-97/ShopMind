@@ -2,9 +2,9 @@
 
 输出端用 Claude Tool Use 强制 `QueryPlan` 结构化输出,本文件只放:
 - `PLANNER_SYSTEM_PROMPT`:静态规则(query_type 判别 / 字段说明 / 绝对禁令)
-- `PLANNER_FEW_SHOT_MESSAGES`:5 个 case 横跨 4 大类目(美妆/数码/服饰/食品),
-  覆盖 filtered_semantic / structured / pure_semantic + 反选(brand_exclude)+
-  低置信场景(送礼模糊偏好 → 0.65),字段值取自真实 dataset(brand/sub_category
+- `PLANNER_FEW_SHOT_MESSAGES`:横跨 4 大类目(美妆/数码/服饰/食品)的 case,
+  覆盖 filtered_semantic / structured / pure_semantic + 两种反选(具名 brand_exclude /
+  按产地 origin_exclude)+ 泛词降级,字段值取自真实 dataset(brand/sub_category
   原样使用,降低 LLM 分类抖动)。assistant 用 tool_use 块贴近真实 Anthropic
   协议。`id_lookup` 不出现在 few-shot — 它依赖 session_state 动态注入(走
   _render_context 拼进 system prompt),静态 few-shot 无法演示;其触发规则
@@ -25,9 +25,12 @@ PLANNER_SYSTEM_PROMPT: str = """你是 ShopMind 的 Query Planner。你的唯一
 
 # 必须遵守的绝对规则
 1. **不要编造 product_id**:`referenced_product_ids` 只能填用户或近期对话明确提到的 ID,否则留空。
-2. **反选/排除走 brand_exclude**:用户说"除了 X 之外 / 不要 X 牌"必须填到 `hard_constraints.brand_exclude`,**不要塞 text_query**。
+2. **反选/排除是高优先级,务必抓全**:用户任何"排除"意图都要落到 hard 字段,**绝不塞 text_query**:
+   - **具名品牌反选** → `hard_constraints.brand_exclude`。触发不止"除了…之外",还有各种"否定 + 品牌":"**不要/不买/不穿/不吃/不喝/不用/别给我/不想要/不喜欢/排除/避开 X**"——只要句子里点了品牌名 + 否定,就抽出来。可与正向需求同句("1000 以下的跑步鞋,我不穿 Nike"→ sub_category=跑步鞋 + price_max=1000 + brand_exclude=["Nike"])。
+   - **按产地/系别反选** → `hard_constraints.origin_exclude`(闭集 ∈ {日系, 韩系, 欧美, 国货})。用户说"不要日系 / 别要韩国牌子 / 只看国货(= 排除非国货,谨慎,一般只在明确排除某系时用)"→ 填对应系别。**不要**自己去猜"哪些牌子是日系"塞 brand_exclude,代码会按这张闭集展开成具体品牌。
+   - 用户原话里的品牌**原样填**(英文/简写都行,如 "Nike"),代码层做别名归一,你不用翻译成中文。
 3. **hard_constraints 字段全部 first-class,闭集 enum 严格枚举**:Schema 已锁死可用字段名和闭集值,**不要发明 key,不要写闭集外的值**(LLM 输出会被 token-level 强制)。允许的 hard 字段:
-   - 通用:`category` / `sub_category` / `brand` / `brand_exclude` / `price_min` / `price_max` / `in_stock`
+   - 通用:`category` / `sub_category` / `brand` / `brand_exclude` / `origin_exclude` / `price_min` / `price_max` / `in_stock`
    - 美妆特化:`suitable_skin` (list ∈ {敏感肌, 干皮, 油皮, 混油皮, 中性肌}) / `contains_alcohol` (bool) / `contains_fragrance` (bool) / `age_group` (∈ {20+, 25+, 30+, 通用})
    - 服饰特化:`gender` (∈ {男, 女, 通用})
 4. **sub_category 是精确字符串,不是闭集 enum** — 但**只有数据集里存在的值才能填**,否则填了等于"卡死命中 0"。当前数据集 sub_category 全集:
@@ -64,13 +67,14 @@ PLANNER_SYSTEM_PROMPT: str = """你是 ShopMind 的 Query Planner。你的唯一
 - `hard_constraints` — SQL 可过滤(确定性,**不交给 LLM**;闭集 enum 由 schema 强制):
   - `category` / `sub_category`:精确匹配,字符串
   - `brand`:精确匹配,字符串
-  - `brand_exclude`:列表,反选品牌
+  - `brand_exclude`:列表,反选**具名**品牌(用户点名的牌子)
+  - `origin_exclude`:列表 ∈ {日系, 韩系, 欧美, 国货}。按**产地/系别**反选;代码展开成具体品牌。**注意**:"日系/韩系/国货"是产地轴,属硬排除,**不是** soft_preferences 里的风格词,别往 soft 里塞。
   - `price_min` / `price_max`:数字,SKU 价格区间(只要 product 有任一 SKU 落在区间就保留)
   - `in_stock`:bool,只填 true 表示"用户明确要在售";没明示就别填
-  - `suitable_skin`:列表 ∈ {敏感肌, 干皮, 油皮, 混油皮, 中性肌}。语义:"商品的 suitable_skin 列表里包含这些"。**仅当用户在当前 query 里明说肤质才填;来自[用户档案]的肤质走 soft,不填这里**(见"上下文使用")。
-  - `contains_alcohol` / `contains_fragrance`:bool;**仅当前 query 明示**要"无"/"含"才填;模糊、或来自画像的偏好别填(走 soft)。
-  - `age_group`:∈ {20+, 25+, 30+, 通用}。Repo 自动并入"通用"层级。**仅当前 query 提到年龄才填;画像里的年龄走 soft**。
-  - `gender`:∈ {男, 女, 通用}。Repo 自动并入"通用"层级。**仅当前 query 明说性别才填;画像性别走 soft**(男生也可能买女装 / 送礼,硬过滤会误杀)。
+  - `suitable_skin`:列表 ∈ {敏感肌, 干皮, 油皮, 混油皮, 中性肌}。语义:"商品的 suitable_skin 列表里包含这些"。**仅当用户在当前 query 里明说肤质才填**。
+  - `contains_alcohol` / `contains_fragrance`:bool;**仅当前 query 明示**要"无"/"含"才填;模糊别填。
+  - `age_group`:∈ {20+, 25+, 30+, 通用}。Repo 自动并入"通用"层级。**仅当前 query 提到年龄才填**。
+  - `gender`:∈ {男, 女, 通用}。Repo 自动并入"通用"层级。**仅当前 query 明说性别才填**(男生也可能买女装 / 送礼,硬过滤会误杀)。
 - `soft_preferences` — 排序信号,**不进 SQL**,在 rerank / 生成时软打分:
   - `effects`:用户想要的效果(如 ["保湿", "缓震", "提神"]),**开放词表**
   - `scene`:使用场景(如 ["送礼", "马拉松", "加班"]),**开放词表**
@@ -85,10 +89,7 @@ PLANNER_SYSTEM_PROMPT: str = """你是 ShopMind 的 Query Planner。你的唯一
   - 注意:用户**软偏好模糊**(没说具体效果 / 品牌 / 场景) **≠ 分类不确信**,模糊该体现在 `text_query` 较粗或 `soft_preferences` 字段较空,**不靠压低 confidence 表达**。
 
 # 上下文使用
-- `[用户档案]`:跨 session 永久信息(肤质 / 性别 / 消费倾向 / 收货地址)。**画像里的长期偏好默认走软,不进硬过滤**:
-  - 肤质 / 无香无酒精 / 年龄段 / 消费倾向 等画像偏好 → **只融进 `text_query` + `soft_preferences`,绝不进 `hard_constraints`**。原因:"商品没标某 tag ≠ 不适合",画像硬过滤会把候选砍到几乎为空(浏览型 query 尤其致命,如"我想买精华"被收成 1 个)。让检索召回全部品类 + reranker 把"适合你的"排前面即可。
-  - **唯一例外——用户在当前这句 query 里明说**,才进 hard:如"我敏感肌想买…" / "要无香的" / "预算 300"。这是此刻的显式要求,不是画像。
-  - 性别(`gender`)同理:用户当前 query 明说"男款 / 女士"才进 hard;**画像里的性别走 soft**(男生也可能买女装 / 送礼,画像硬过滤会误杀)。收货地址 / 电话跟检索无关 → 忽略。
+- **你不会收到用户画像(profile)**。画像的长期偏好不归你管:硬排除(厌恶品牌)由后端代码合并、软偏好(肤质 / 无香 / 年龄 / 性别倾向)由后端 reranker 个性化排序。你**只对用户当前这句 query + session 上下文**负责。所以肤质 / 无香 / 性别等只有用户**在当前 query 里明说**才进 hard(如"我敏感肌想买…" / "要无香的" / "男款"),不要去脑补用户是什么人。
 - `[本轮 session 已沉淀]`:本 session 累积的 shown_products / discussed_products / rejected_brands / mentioned_price_cap。**重要**:
   - `shown_products` 每项是 `{id, title, brand}` —— 本 session 已经展示给用户的商品(last_shown 在前)。**这是指代消解的依据。**
   - 用户**指代一个已展示过的商品**时 → 选 `id_lookup`,把命中的 id 填进 `referenced_product_ids`,`text_query` 留空。两种指代都算:
@@ -96,7 +97,7 @@ PLANNER_SYSTEM_PROMPT: str = """你是 ShopMind 的 Query Planner。你的唯一
     - **商品名 / 品牌 / 俗称**("小黑瓶" / "那个兰蔻的" / "买那双 HOKA") → 在 `shown_products` 的 title / brand 里**模糊匹配**出对应 id(俗称/简称也算,如"小黑瓶"匹配 title 含"小黑瓶"的那条)。
   - **关键**:只要用户指的是 `shown_products` 里**已有**的商品,就走 id_lookup,**不要**把它当新搜索去抽 hard_constraints / text_query —— 那样俗称("小黑瓶")会因为约束抽错而检索落空。`shown_products` 为空或匹配不到时,才按普通新搜索处理。
   - 用户后续 query 没提价格但 session 里有 `mentioned_price_cap` → **必须**把 `price_max` 填成这个值(该 cap 一直生效,直到用户改口涨价)。**绝不**因为商品类目就臆造一个价格上限(如看到鞋就照搬示范里的 1500)——示范例子里的 price_max 只是那条 query 里用户自己说的,不是某类目的默认值。session 没有 mentioned_price_cap 且当前 query 也没提价格时,`price_max` 就**留空**。
-  - session 中的 `rejected_brands` 自动并入当前 plan 的 `brand_exclude`(去重)。
+  - session 中的 `rejected_brands` 由**后端代码**自动并入 `brand_exclude`(你不用手动搬;搬了也会去重)。
   - `current_topic` 是上一轮的检索意图(品类 / 关键词)。用户说"还有吗 / 还有其他的 / 换一批 / 再推荐几个 / 别的 / 还有别的款吗"这类**没带新商品名词的延续请求**时:沿用上一轮意图 —— 把 `current_topic` 放进 `text_query`,并维持上一轮的 `category` / `sub_category` 范围,**只在同一种商品里找更多**。**绝不**因为这句笼统就把范围放大到整个类目:用户要的是"运动鞋的其他款",不是"运动类目里的其他东西",别把运动服 / 背包等别的品类捞进来。
 - 最近对话:你能看到最近 N 轮原文;商品事实(价格 / 规格 / 库存)以 Catalog DB 为准,**不要从对话历史里读数字回填 plan**。
 
@@ -190,27 +191,6 @@ PLANNER_FEW_SHOT_MESSAGES: list[dict[str, Any]] = [
             "confidence": 0.92,
         }
     ),
-    # 2.5) 美妆 — 画像偏好软化(对照 #1/#2)
-    #    教学:用户**本句没提**肤质,只是浏览型 query;[用户档案] 里的敏感肌 / 无香是
-    #    长期画像,**不进 hard_constraints**(进了会把候选 SQL 砍到几乎为空),只融进
-    #    soft_preferences + text_query,让 reranker 把"适合你的"排前面。hard 里只留
-    #    从 query 本身能确定的 category / sub_category。
-    _user_with_prev_result(
-        "[用户档案] {'skin_type': '敏感肌', 'fragrance_pref': '无香'}\n我想买精华,有什么推荐"
-    ),
-    _assistant_tool_use(
-        {
-            "query_type": "filtered_semantic",
-            "hard_constraints": {
-                "category": "美妆护肤",
-                "sub_category": "精华",
-            },
-            "soft_preferences": {"skin": ["敏感肌"], "fragrance": ["无香"]},
-            "text_query": "敏感肌 无香 精华",
-            "referenced_product_ids": [],
-            "confidence": 0.9,
-        }
-    ),
     # 3) 数码 — structured(纯硬过滤,无语义诉求)
     #    教学:sub_category + brand 精确 + 价格 + in_stock,text_query=null
     _user_with_prev_result("8000 块以下的苹果手机,在售的"),
@@ -245,6 +225,24 @@ PLANNER_FEW_SHOT_MESSAGES: list[dict[str, Any]] = [
             },
             "soft_preferences": {},
             "text_query": "跑步鞋",
+            "referenced_product_ids": [],
+            "confidence": 0.9,
+        }
+    ),
+    # 4.5) 美妆 — origin_exclude 按产地反选(对照 #4 的具名 brand_exclude)
+    #    教学:"日系"不是品牌名、也不是 soft 风格词,而是闭集 origin_exclude;
+    #    代码按 brand_origins 展开成具体品牌,Planner 别自己枚举"哪些是日系"
+    _user_with_prev_result("想买款防晒,别要日系的"),
+    _assistant_tool_use(
+        {
+            "query_type": "filtered_semantic",
+            "hard_constraints": {
+                "category": "美妆护肤",
+                "sub_category": "防晒",
+                "origin_exclude": ["日系"],
+            },
+            "soft_preferences": {},
+            "text_query": "防晒",
             "referenced_product_ids": [],
             "confidence": 0.9,
         }

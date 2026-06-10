@@ -8,6 +8,12 @@
   - Reranker 阈值过滤 < RERANK_THRESHOLD → 返回空(no_match,铁律 2)
   - 全字段从 DB enrich(铁律 3),LLM 只能复述
 
+排除约束(反选)三来源统一在 `_apply_exclusions` 代码层合并进 hard_constraints
+(当前 query brand_exclude + session.rejected_brands + profile.brand_exclude +
+origin_exclude 展开),不再单独依赖 Planner / prompt 把它们抓全。出 card 前再过一道
+确定性 `_drop_excluded` guard:card 由工具 payload 直接 emit、Agent 删不掉,所以被
+排除的商品必须在进 payload 前就剔干净(全剔光 → no_match,诚实告知而非硬塞 + 嘴上道歉)。
+
 确定性结果旁路:判据是 **hits 带不带 matched_chunks**。
   - **空**(id_lookup / structured / filtered_semantic 在 text_query 为空退化时)
     = 纯 SQL 确定性命中,候选即答案 → 跳过 LLM rerank 的打分/阈值,直接全字段 enrich
@@ -25,6 +31,8 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from server.domain.types import ProductHit, QueryPlan
+from server.indexing.brand_aliases import normalize_brand
+from server.indexing.brand_origins import brands_for_origins
 from server.llm.planner import PlannerError, plan_query
 from server.llm.reranker import RerankerError
 from server.rag.retrieval.dispatcher import RetrievalError
@@ -66,24 +74,87 @@ def _is_relaxed(plan: QueryPlan) -> bool:
     )
 
 
-def _merge_profile_brand_exclude(
-    plan: QueryPlan, profile: dict[str, Any] | None
-) -> QueryPlan:
-    """画像里不喜欢的品牌(profile.preferences.brand_exclude)→ 并进
-    hard_constraints.brand_exclude(明确厌恶 = 硬过滤掉;去重,品牌别名 normalize 在 Repo 层做)。
+def _apply_exclusions(
+    plan: QueryPlan,
+    *,
+    profile: dict[str, Any] | None,
+    session_snapshot: dict[str, Any] | None,
+) -> tuple[QueryPlan, set[str]]:
+    """把所有反选来源**代码层**合并进 hard_constraints.brand_exclude,并返回归一化后的
+    被排除品牌集(供出 card 前的 guard 复用)。
 
-    其余画像偏好(肤质 / 品牌偏好 / 年龄 / 性别 / 护肤诉求等)由 reranker 的确定性 fit 重排
-    (`_profile_fit_boost`)在阈值过滤后做 ±微调,不在检索 query 层处理。
+    四个来源(去重、normalize 别名,最终都落到 SQL `brand NOT IN`):
+    1. 当前 query 的 `brand_exclude`(Planner 抽,"不要 Nike")
+    2. 当前 query 的 `origin_exclude`(Planner 抽闭集"日系"→ brand_origins 展开成具体品牌)
+    3. session `rejected_brands`(本 session 累积的拒绝,代码兜底——不再只靠 prompt 让 LLM 并)
+    4. profile `preferences.brand_exclude`(画像里长期厌恶的品牌)
+
+    其余画像软偏好(肤质 / 品牌偏好 / 年龄 / 性别 / 护肤诉求…)**不在这里**——由 reranker
+    的确定性 fit 重排(`_profile_fit_boost`)在阈值过滤后做 ±微调,是软偏好的唯一 owner。
     """
     prefs = (profile or {}).get("preferences") or {}
-    profile_excludes = [b for b in (prefs.get("brand_exclude") or []) if b]
-    if not profile_excludes:
-        return plan
-    merged = list(
-        dict.fromkeys([*plan.hard_constraints.brand_exclude, *profile_excludes])
+    snap = session_snapshot or {}
+
+    raw: list[str] = [
+        *plan.hard_constraints.brand_exclude,
+        *brands_for_origins(plan.hard_constraints.origin_exclude),
+        *(snap.get("rejected_brands") or []),
+        *(prefs.get("brand_exclude") or []),
+    ]
+    # normalize 别名(Nike→耐克)+ 去重保序
+    excluded: list[str] = list(
+        dict.fromkeys(normalize_brand(b) for b in raw if b)
     )
-    hc = plan.hard_constraints.model_copy(update={"brand_exclude": merged})
-    return plan.model_copy(update={"hard_constraints": hc})
+
+    # **当前 query 明确点名要某品牌 → 本轮放行它**,盖过长期(profile)/临时(session)的排除。
+    # 例:profile 长期不买 Nike,但这次"买 Nike 的鞋送朋友" → 本轮不能把 Nike 排掉
+    #(否则 SQL 出现 `brand=耐克 AND brand NOT IN(耐克)` → 自相矛盾零结果)。
+    # "送朋友"这类代购意图本就不会写进本人 profile,所以这里只需放行、不动档案。
+    requested = normalize_brand(plan.hard_constraints.brand)
+    if requested:
+        excluded = [b for b in excluded if b != requested]
+
+    if not excluded:
+        return plan, set()
+
+    hc = plan.hard_constraints.model_copy(update={"brand_exclude": excluded})
+    return plan.model_copy(update={"hard_constraints": hc}), set(excluded)
+
+
+def _drop_excluded(
+    payloads: list[dict[str, Any]],
+    *,
+    excluded_brands: set[str],
+    plan: QueryPlan,
+) -> list[dict[str, Any]]:
+    """出 card 前的确定性 guard:剔掉任何违反排除约束的商品。
+
+    SQL 硬过滤理论上已经挡掉这些,但 card 由工具 payload 直接 emit、Agent 无法删卡——
+    这是"被排除商品绝不进 card"的最后一道代码保证(防任何上游路径漏过)。检查:
+    - 品牌 ∈ excluded_brands(normalize 后比较)
+    - 属性硬约束(contains_alcohol / contains_fragrance):商品值与约束不符即剔
+      (字段缺失视为不符,从严——本就不该通过 SQL @> 到这里)
+    """
+    hc = plan.hard_constraints
+    kept: list[dict[str, Any]] = []
+    for p in payloads:
+        if excluded_brands and normalize_brand(p.get("brand")) in excluded_brands:
+            continue
+        props = p.get("properties") or {}
+        if hc.contains_alcohol is not None and props.get("contains_alcohol") != hc.contains_alcohol:
+            continue
+        if hc.contains_fragrance is not None and props.get("contains_fragrance") != hc.contains_fragrance:
+            continue
+        kept.append(p)
+    return kept
+
+
+def _no_match(plan: QueryPlan, strategy: str) -> ToolResult:
+    """统一的 no_match 返回(空 products + meta 带 plan,供上游兜底文案)。"""
+    return ToolResult(
+        payload={"products": [], "strategy": strategy, "no_match": True},
+        meta={"plan": plan.model_dump(mode="json")},
+    )
 
 
 class SearchProductsInput(BaseModel):
@@ -120,19 +191,22 @@ class SearchProductsTool(Tool):
         if not query:
             raise ToolError("query 不能为空")
 
-        # 1) Planner — 透传 profile + session(指代消解走 id_lookup,§4.2 上下文使用)
+        # 1) Planner — 只透传 session(指代消解走 id_lookup,§4.2 上下文使用)。
+        #    **不传 profile**:画像不参与检索 plan —— 硬排除由 _apply_exclusions 代码合并,
+        #    软偏好由 reranker 的 _profile_fit_boost 独占,Planner 不再两头折叠(职责单一)。
         try:
             plan = await plan_query(
                 query,
-                profile=deps.user_profile,
                 session_state=deps.session_snapshot,
             )
         except PlannerError as e:
             log.warning("search_planner_failed", error=str(e))
             raise ToolError(f"无法理解 query:{e}") from e
 
-        # 1.5) 画像里不喜欢的品牌 → 并进 hard 过滤(其余画像偏好走 reranker 的确定性 fit 重排)
-        plan = _merge_profile_brand_exclude(plan, deps.user_profile)
+        # 1.5) 统一合并所有反选来源(query / origin / session.rejected / profile)→ hard 过滤
+        plan, excluded_brands = _apply_exclusions(
+            plan, profile=deps.user_profile, session_snapshot=deps.session_snapshot
+        )
 
         # 2) Dispatcher(adaptive retrieval)
         try:
@@ -163,21 +237,19 @@ class SearchProductsTool(Tool):
                 )
 
         if not hits:
-            return ToolResult(
-                payload={
-                    "products": [],
-                    "strategy": retrieval_result.strategy,
-                    "no_match": True,
-                },
-                meta={"plan": plan.model_dump(mode="json")},
-            )
+            return _no_match(plan, retrieval_result.strategy)
 
         # 2.5) 确定性结果旁路:hits 无 matched_chunks = 纯 SQL 命中(id_lookup /
         # structured / filtered_semantic 退化),候选即答案 → 只 enrich,不打分不阈值
         # (否则确定性命中被 Haiku 阈值误伤,吐 spurious no_match)。详见模块 docstring。
         if all(not h.matched_chunks for h in hits):
             return await self._present_deterministic(
-                hits, deps=deps, plan=plan, query=query, strategy=retrieval_result.strategy
+                hits,
+                deps=deps,
+                plan=plan,
+                query=query,
+                strategy=retrieval_result.strategy,
+                excluded_brands=excluded_brands,
             )
 
         # 3) Reranker(LLM Haiku;阈值过滤 + DB enrich)
@@ -193,19 +265,18 @@ class SearchProductsTool(Tool):
 
         if not ranked:
             # 铁律 2:阈值兜底,不硬推不相关商品
-            return ToolResult(
-                payload={
-                    "products": [],
-                    "strategy": retrieval_result.strategy,
-                    "no_match": True,
-                },
-                meta={"plan": plan.model_dump(mode="json")},
-            )
+            return _no_match(plan, retrieval_result.strategy)
 
         # 4) 序列化:LLM payload(全字段)+ SSE card(lean)
         product_payloads: list[dict[str, Any]] = [
             product_summary_from_ranked(r, base_url=deps.base_url) for r in ranked
         ]
+        # 出 card 前 guard:被排除的商品绝不进 payload(全剔光 → 诚实 no_match)
+        product_payloads = _drop_excluded(
+            product_payloads, excluded_brands=excluded_brands, plan=plan
+        )
+        if not product_payloads:
+            return _no_match(plan, retrieval_result.strategy)
         cards: list[dict[str, Any]] = [product_card(p) for p in product_payloads]
 
         log.info(
@@ -232,6 +303,7 @@ class SearchProductsTool(Tool):
         plan: Any,
         query: str,
         strategy: str,
+        excluded_brands: set[str],
     ) -> ToolResult:
         """确定性结果旁路:按 hit 顺序(= SQL / 引用顺序)从 DB 全字段 enrich,不走 rerank。
 
@@ -245,14 +317,17 @@ class SearchProductsTool(Tool):
                     products.append(p)
 
         if not products:
-            return ToolResult(
-                payload={"products": [], "strategy": strategy, "no_match": True},
-                meta={"plan": plan.model_dump(mode="json")},
-            )
+            return _no_match(plan, strategy)
 
         product_payloads = [
             product_summary_from_db(p, base_url=deps.base_url) for p in products
         ]
+        # 出 card 前 guard:确定性旁路同样要剔被排除项(全剔光 → no_match)
+        product_payloads = _drop_excluded(
+            product_payloads, excluded_brands=excluded_brands, plan=plan
+        )
+        if not product_payloads:
+            return _no_match(plan, strategy)
         cards = [product_card(p) for p in product_payloads]
         log.info(
             "search_done",

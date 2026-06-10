@@ -24,6 +24,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 SuitableSkin = Literal["敏感肌", "干皮", "油皮", "混油皮", "中性肌"]
 Gender = Literal["男", "女", "通用"]
 AgeGroup = Literal["20+", "25+", "30+", "通用"]
+# 品牌产地/系别(反选用):闭集只锁"轴",具体品牌枚举在 brand_origins.py 由代码展开
+Origin = Literal["日系", "韩系", "欧美", "国货"]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -53,6 +55,8 @@ class HardConstraints(BaseModel):
     sub_category: str | None = None
     brand: str | None = None
     brand_exclude: list[str] = Field(default_factory=list)
+    # 按产地/系别反选(如"不要日系"):检索前由 brand_origins 展开并入 brand_exclude
+    origin_exclude: list[Origin] = Field(default_factory=list)
     price_min: float | None = None
     price_max: float | None = None
     in_stock: bool | None = None
@@ -73,6 +77,7 @@ class HardConstraints(BaseModel):
             and self.sub_category is None
             and self.brand is None
             and not self.brand_exclude
+            and not self.origin_exclude
             and self.price_min is None
             and self.price_max is None
             and self.in_stock is None

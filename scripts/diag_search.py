@@ -37,13 +37,12 @@ async def main() -> None:
     print("== 加载的文件路径(确认是你编辑的工作树)==")
     print("  search.py :", search_mod.__file__)
     print("  planner.py:", planner_prompt.__file__)
-    # few-shot 里是否已含「画像软化」反例(我加的 2.5 号 case 标志)
-    has_fix = any(
-        "soft_preferences" in json.dumps(m, ensure_ascii=False)
-        and "敏感肌" in json.dumps(m, ensure_ascii=False)
+    # few-shot 里是否已含「按产地反选(origin_exclude)」示例
+    has_origin = any(
+        "origin_exclude" in json.dumps(m, ensure_ascii=False)
         for m in planner_prompt.PLANNER_FEW_SHOT_MESSAGES
     )
-    print("  planner few-shot 含画像软化反例:", has_fix)
+    print("  planner few-shot 含 origin_exclude 反选示例:", has_origin)
 
     async with AsyncSessionLocal() as s:
         p = await UserRepo.get_profile(s, USER_ID)
@@ -60,16 +59,20 @@ async def main() -> None:
     print("\n== PROFILE ==")
     print(" ", json.dumps(profile, ensure_ascii=False))
 
-    plan = await plan_query(QUERY, profile=profile, session_state=None)
+    # 与生产一致:Planner 不收 profile(画像走代码合并 + reranker)
+    plan = await plan_query(QUERY, session_state=None)
     print("\n== PLAN ==")
     print("  hard:", json.dumps(plan.hard_constraints.model_dump(), ensure_ascii=False))
     print("  suitable_skin 是否为空(应为空):", not plan.hard_constraints.suitable_skin)
     print("  text_query:", plan.text_query)
 
-    # 画像里不喜欢的品牌 → 并进 hard(其余偏好走 reranker 的确定性 fit 重排)
-    plan = search_mod._merge_profile_brand_exclude(plan, profile)
-    print("\n== _merge_profile_brand_exclude 后 ==")
+    # 统一合并所有反选来源(query/origin/session.rejected/profile)→ hard
+    plan, excluded_brands = search_mod._apply_exclusions(
+        plan, profile=profile, session_snapshot=None
+    )
+    print("\n== _apply_exclusions 后 ==")
     print("  brand_exclude(hard):", plan.hard_constraints.brand_exclude)
+    print("  excluded_brands(guard 用):", sorted(excluded_brands))
     print("  text_query(未增强):", plan.text_query)
 
     async with AsyncSessionLocal() as s:

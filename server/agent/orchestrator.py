@@ -33,7 +33,10 @@ from server.agent.session_state import (
     update_session_state_after_turn,
 )
 from server.domain.types import QueryPlan
+from server.indexing.brand_aliases import normalize_brand
+from server.indexing.brand_origins import brands_for_origins
 from server.llm.agent_call import StreamChunk, stream_agent_turn
+from server.llm.preference_extractor import extract_exclusions
 from server.storage.catalog_repo import CatalogRepo
 from server.storage.user_repo import UserRepo
 from server.tools.base import (
@@ -129,6 +132,11 @@ class Orchestrator:
         await self._ensure_session_hydrated(
             user_id=user_id, session_id=session_id, state=state
         )
+        # 偏好抽取(记忆抽取层,先于 Agent / 先于检索):用 Haiku 强制抽出用户这句话里的
+        # 品牌/产地排除("我不穿 Nike""别要日系""其实耐克也行"——任意说法都懂),代码落进
+        # profile + 内存会话态。**不靠聊天 Agent 自觉调 update_preference**(它会漏 / 假称"已记下")。
+        # 落 profile → 永久 + 前端"不想要的品牌"立即可见;落 state → 本轮检索即生效。
+        await self._capture_brand_exclusions(user_id=user_id, query=user_query, state=state)
         # context 段:profile + session_state(动态部分,不入 prompt cache)
         extra_context, profile_dict, session_dict = await self._build_turn_context(
             user_id, state
@@ -308,6 +316,50 @@ class Orchestrator:
             session_id=session_id,
             n_discussed=len(discussed),
             n_last_shown=len(last_shown),
+        )
+
+    async def _capture_brand_exclusions(
+        self, *, user_id: str, query: str, state: SessionState
+    ) -> None:
+        """抽用户原话里的品牌/产地排除(及改口接受),落 profile(永久 + 前端可见)+ 内存会话态。
+
+        理解归 LLM(extract_exclusions,任意说法都懂);执行归代码(下面这段)。幂等去重,
+        没信号就零副作用。落 profile 让"我不穿 Nike"无需 Agent 配合即写入"不想要的品牌";
+        同步进 state.rejected_brands 让**本轮**检索立即排除。"现在能接受 X"则从两处移除。
+        """
+        ex = await extract_exclusions(query)
+        if ex.is_empty():
+            return
+
+        def _norm(names: list[str], origins: list[str]) -> set[str]:
+            return {
+                b
+                for b in (
+                    normalize_brand(x) for x in [*names, *brands_for_origins(origins)]
+                )
+                if b
+            }
+
+        # 长期 → 写 profile(永久)+ 会话态;本次 → 只进会话态(不污染永久档案)
+        stable = _norm(ex.brand_exclude, ex.origin_exclude)
+        transient = _norm(ex.brand_exclude_session, ex.origin_exclude_session)
+        remove = {b for b in (normalize_brand(x) for x in ex.brand_unexclude) if b}
+
+        # profile 只动"长期 add + 取消 remove";本次排除不进 profile
+        if stable or remove:
+            async with self._deps.session_factory() as session:
+                await UserRepo.merge_preference_list(
+                    session, user_id, "brand_exclude", sorted(stable), remove=sorted(remove)
+                )
+                await session.commit()
+        # 会话态:长期 + 本次都进(本轮检索都要排),再去掉改口接受的
+        state.rejected_brands = (state.rejected_brands | stable | transient) - remove
+        log.info(
+            "brand_exclusions_captured",
+            user_id=user_id,
+            stable=sorted(stable),
+            transient=sorted(transient),
+            remove=sorted(remove),
         )
 
     async def _build_turn_context(

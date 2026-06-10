@@ -36,6 +36,19 @@ _BRAND_ALIAS_MAP: dict[str, str] = {
 }
 
 
+def alias_surfaces() -> dict[str, str]:
+    """所有已知品牌"表面写法 → 规范名"映射(别名 + 规范名自身),给反选文本扫描用。
+
+    含别名 key(Nike / nike / Apple…)和它们的规范值(耐克 / Apple 苹果…),
+    后者也要能在用户原文里被直接匹配到。
+    """
+    out: dict[str, str] = {}
+    for surface, canonical in _BRAND_ALIAS_MAP.items():
+        out[surface] = canonical
+        out[canonical] = canonical  # 规范名本身也是一种"表面写法"
+    return out
+
+
 def normalize_brand(raw: str | None) -> str | None:
     """归一品牌名到规范形式。
 

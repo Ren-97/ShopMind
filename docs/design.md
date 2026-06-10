@@ -29,16 +29,16 @@
 
 ### 1.1 解决什么问题
 
-传统电商搜索是"关键词匹配 + 人工筛选"，用户得自己翻列表、比参数。直接套一个通用大模型又有两个致命问题：**会一本正经编造不存在的商品/参数（幻觉）**，且无法接入真实库存与下单。ShopMind 的定位就是在两者之间：**用 LLM 的对话理解力，约束在真实商品数据之上，做诚实、闭环的导购**。
+传统电商搜索是"关键词匹配 + 人工筛选"，用户得自己翻列表、比参数。直接套一个通用大模型又有两个致命问题：会一本正经编造不存在的商品/参数（幻觉），且无法接入真实库存与下单。ShopMind 的定位就在两者之间：用 LLM 的对话理解力，约束在真实商品数据之上，做诚实、闭环的导购。
 
 ### 1.2 对应赛题加分项
 
 | 方向 | 本项目落地 |
 |---|---|
-| **业务闭环**（4.1） | 对话内加购物车 → 下单结算 → 订单确认，全程卡片化 |
-| **对话智能**（4.3） | 多轮上下文、反选（排除品牌/价格上限）、商品对比、个性化重排 |
+| **业务闭环** | 对话内加购物车 → 下单结算 → 订单确认，全程卡片化 |
+| **对话智能** | 多轮上下文、反选（排除品牌/价格上限）、商品对比、个性化重排 |
 | **诚实推荐 / 无幻觉** | 三道防幻觉铁律 + 评论双面平衡摘要（优点与注意点都给） |
-| 多模态（4.2） | **V1 聚焦文本链路**；图像检索为 V2 预留（见 §9） |
+| 多模态 | **V1 聚焦文本链路**；图像检索为 V2 预留（见 §9） |
 
 > **无幻觉是赛题第一减分项**，也是本项目最核心的设计约束——架构里很多取舍（SQL 硬过滤、阈值兜底、事实只走 DB）都是为它服务的。
 
@@ -79,7 +79,7 @@
         │ 订单/历史     │                       │ dense+sparse │
         └──────────────┘                       └──────────────┘
 
-外部服务：Claude (Sonnet 主对话 / Haiku 规划·重排) · Gemini Embedding · 火山引擎 Doubao(仅离线评测 Judge,非运行时依赖)
+外部服务：Claude（Sonnet 主对话 / Haiku 规划·重排）· Gemini Embedding · 火山引擎 Doubao（仅离线评测 Judge，非运行时依赖）
 ```
 
 ### 2.2 一次对话的完整链路
@@ -143,11 +143,11 @@
 
 ## 4. 关键技术方案
 
-> 本章是设计重点，集中讲清四个差异化能力：**自适应检索、防幻觉、对话智能闭环、诚实评论摘要**。
+> 本章是设计重点，讲清四个差异化能力——**自适应检索（§4.1）、防幻觉（§4.2）、对话智能（§4.4）、诚实评论摘要（§4.5）**，以及支撑它们的 **Agent 工具循环（§4.3）** 与 **流式协议（§4.6）**。
 
 ### 4.1 自适应检索（Adaptive Retrieval）
 
-**问题**：电商查询形态差异极大——"iPhone 16 Pro"是指名查找，"500 元以内的运动鞋"是纯结构化筛选，"适合熬夜党的护肤品"才真正需要语义理解。**用单一 Hybrid 检索一刀切，会在简单查询上浪费算力、在结构化筛选上引入语义噪声。**
+**问题**：电商查询形态差异极大——"iPhone 16 Pro"是指名查找，"500 元以内的运动鞋"是纯结构化筛选，"适合熬夜党的护肤品"才真正需要语义理解。用单一 Hybrid 检索一刀切，会在简单查询上浪费算力，在结构化筛选上引入语义噪声。
 
 **方案**：`search_products` 工具内先由 Planner 把查询分诊到 4 种策略，Dispatcher 按类型走不同路径：
 
@@ -160,12 +160,12 @@
 
 **混合检索流程**：dense（向量语义）+ sparse（BM25，中文先 jieba 切词）并行编码 → Qdrant `query_points` **原生 RRF 倒数排名融合**（带 product_id 白名单 filter）→ 应用层按 `product_id` 聚合取最高分 → 粗排阈值剔除融合分极低的尾部噪声候选（送 LLM 重排前的成本兜底）。
 
-**两条鲁棒性兜底**（保证既不漏召、也不误伤）：
+**两条鲁棒性兜底**（既不漏召、也不误伤）：
 
-- **0 命中放宽重试**：Planner 猜的开放类目（category/sub_category）可能写错（"牛奶"→"牡奶"）导致 SQL 精确过滤清零；此时**只摘掉这俩开放类目**、保留用户明说的闭集约束（价格/品牌/性别/肤质），用原 query 走语义召回再兜一次——候选仍是真实 DB 商品，铁律不破。
-- **确定性结果跳过重排**：纯 SQL 命中（id_lookup / structured / filtered_semantic 退化）没有 matched_chunks，是"候选即答案"，直接全字段 enrich，**不走 LLM 重排打分**——否则像"这个""第二款"这类代词、俗称被当成检索 query 送去打分，会被 Haiku 的相关性阈值误判成"没找到"（假阴性）。
+- **零命中放宽重试**：Planner 猜的类目名可能写错（"牛奶"→"牡奶"），导致 SQL 精确过滤一个都不剩。这时只摘掉类目这一个开放字段、保留用户明说的硬约束（价格/品牌/性别/肤质），用原 query 重走一次语义召回，候选仍是真实 DB 商品，铁律不破。
+- **确定性命中跳过重排**：纯 SQL 查出来的结果（指名查找、纯条件筛选）没有经过语义检索，是"查到即答案"，直接取全字段返回，不送 LLM 重排打分。否则"这个""第二款"这类代词会被当成检索词去算相关性，反被打分模型误判成"没找到"（假阴性）。
 
-> **为什么不用单一 Hybrid？** 因为分诊让每类查询都走最合适的路径——结构化查询零 LLM 成本、指名查找零检索噪声，整体更快更准。`HardConstraints` 里肤质 / 年龄段 / 性别等枚举字段用 Pydantic `Literal` 做 schema 约束，Planner 输出被限制在数据集闭集内、从源头杜绝 SQL 过滤的 key/value 漂移；类目 / 品牌 / 价格等开放字段走 Postgres 精确过滤（猜错类目导致零命中时，由上文"放宽重试"摘掉类目再语义兜底，兼顾防幻觉与召回）。低置信度 plan（confidence < 0.7）由 Dispatcher 自动落到默认策略，用户无感知。
+> **为什么不用单一 Hybrid？** 分诊让每类查询都走最合适的路径：结构化查询零 LLM 成本、指名查找零检索噪声，整体更快更准。此外，Planner 抽硬约束时区分两类字段，从源头防止过滤条件"漂移"（编出库里不存在的取值）：**闭集字段**（肤质、年龄段、性别、产地系别）的取值被 schema 限制在数据集已有的枚举内，Planner 不可能写出库里没有的值；**开放字段**（类目、品牌、价格）走 Postgres 精确过滤，万一类目猜错导致零命中，再由上文的"放宽重试"摘掉类目走语义兜底，兼顾防幻觉与召回。置信度过低的 plan 由 Dispatcher 自动落到默认策略，用户无感知。
 
 ### 4.2 三道防幻觉铁律
 
@@ -220,7 +220,7 @@ Agent 调用 #2 (Sonnet)
 | `compare_products` | 多商品逐字段对比（2–5 件） |
 | `manage_cart` | 加购 / 改数量 / 删除 |
 | `start_checkout` | 生成下单快照（地址取自用户档案） |
-| `update_preference` | 记录用户偏好（喜好/排除） |
+| `update_preference` | 记录用户**喜好类**稳定偏好（肤质/尺码/喜欢的品牌/消费档…）；品牌/产地**排除**不归它，由记忆抽取层落档（§4.4） |
 | `recall_history` | 回忆历史浏览/对话 |
 | `show_suggestions` | 生成后续追问建议 |
 
@@ -232,11 +232,13 @@ Agent 调用 #2 (Sonnet)
 
 ### 4.4 对话智能：多轮、反选、对比、个性化
 
-- **多轮上下文**：Planner 看最近 `PLANNER_RECENT_TURNS` 轮，能理解"再便宜点的""换个牌子"这类省略指代。
-- **反选**：用户说"不要 XX 牌""太贵了"，会落进会话态（排除品牌、价格上限），后续检索自动带上，不必重复说。
+- **多轮上下文**：Planner 看最近 N 轮对话（轮数见 §7），能理解"再便宜点的""换个牌子"这类省略指代。
+- **反选（品牌 / 产地排除）**：用户说"不要 XX 牌""不要日系"时，排除全程由代码确定性执行，不押在 LLM 自觉。这件事单独抽成一层、不交给 Agent，是因为聊天模型对"我是油皮"会记，对"不买 X 牌"却常漏、甚至假称"已记下"。具体分三步：
+  - **抽取**：每轮先于 Agent 跑一个强制结构化输出的记忆抽取层（Haiku），把排除信号从原话里抽出来。"我不穿 Nike""那牌子别推了"等任意说法都能理解，不是关键词匹配。
+  - **按范围落档**：第一人称的稳定习惯（"我不穿 X""我从来不用日系"）写进永久档案；只针对本次的裸检索约束（"不要 X 的""这次/今天不要 X"）只进会话态，不污染永久档案。
+  - **检索时合并 + 出卡兜底**：把所有来源的排除（当前这句话、本场累积、永久档案，其中产地排除按对照表展开成具体品牌）合并进 SQL 硬过滤；卡片生成前再过一道排除校验，被排除的商品绝不进卡片（卡片直接由检索结果生成、Agent 无法事后补回；若全被剔光就诚实返回"没找到"）。
 - **对比**：`compare_products` 把多个商品拉成逐字段对比表（卡片），属性同样只取 DB 字段。
-- **个性化：硬过滤 vs 软重排**——这是个刻意的取舍。用户档案里只有 `brand_exclude`（明确厌恶的品牌）走**硬过滤**（并进 SQL `WHERE` 直接排除，明确不要的就不该出现）；**其余所有偏好**（肤质 / 偏好品牌 / 系统偏好 iOS→Apple / 无香 / 年龄段 / 性别 / 护肤诉求）一律走**软重排**：在**已过相关性阈值的合格集**内做确定性 fit 加分（每个命中信号 ±`PROFILE_FIT_SIGNAL_WEIGHT`，总量封顶 ±`PROFILE_FIT_BOOST_CAP`），按 `relevance + fit` 重新排序后截 top_n。**只排序、不淘汰**——相关性（LLM）始终是主维度，fit 只做同档微调，避免把浏览型/泛查询的候选挤空。
-  > 配套约束：Agent 被明确要求**不把画像属性拼进 search query**——否则长期偏好会被当成"本次硬要求"去 SQL 过滤、把结果收窄到极少（"我想买精华"若搜成"敏感肌 无香 精华"，候选会从多款砍到 1 款）。个性化全部后置到排序层，不污染检索。仅结构化、可精确映射的偏好参与；需要同义词归一的开放偏好（如使用场景、风格）V1 不做。
+- **个性化：硬排除 vs 软重排**。硬排除就是上面的"反选"，合并进 SQL，决定一个商品能不能出现；软偏好（肤质、偏好品牌、iOS 用户偏 Apple、无香、年龄、性别、护肤诉求）只影响排序：在已过相关性阈值的合格集内，按"相关性 + 画像契合度"重排，只调顺序、不淘汰任何商品，且契合度加分有上限，相关性始终是主维度。这道加分由 Reranker 独占、按规则计算（非 LLM）。画像不进 Planner，不把它折叠进检索词，否则"我想买精华"会被搜成"敏感肌 无香 精华"，候选从多款砍到只剩 1 款。
 
 ### 4.5 评论双面平衡摘要（诚实推荐的差异化能力）
 
@@ -246,15 +248,13 @@ Agent 调用 #2 (Sonnet)
 
 - `highlights`：用户反复称赞的优点
 - `caveats_text`：可能影响购买的客观警示（刺激性/不适人群/质量缺陷等）
-- `confidence`：基于评论一致性与样本量的信心分——**仅作 LLM 内部信号辅助措辞校准，不持久化入库**
+- `confidence`：基于评论一致性与样本量的信心分——**只在 ingest 摘要时给摘要模型自己校准措辞用（口碑越分散语气越保守），不入库、运行时也不读**
 
 **三个关键设计**：
 
 1. **正负分层采样**：喂给 LLM 前，对好评/差评分层采样并**保底纳入差评**——避免少数差评被海量好评淹没，安全/质量类问题一定被看到。
 2. **按真实占比校准措辞**：把真实总评论数/差评数告诉模型，让它用"少数用户反馈…/较多用户反馈…"准确表述，而不是按采样后被人为抬高的占比误判。
 3. **某一面挑不出反复出现的共性反馈** → 该字段返回 `null`，**不硬凑**（比如评论里没有一致的缺点，`caveats_text` 就留空，而不是硬编一条）。
-
-> 对标亚马逊 "Customers say" / 京东 AI 评价总结——注意点写得客观，推荐才显得可信。
 
 ### 4.6 SSE 流式协议与卡片
 
@@ -326,13 +326,13 @@ server/
 ├── api/             FastAPI 路由：chat(SSE) / product / cart / order / profile / catalog
 ├── agent/           Agent 主循环 + 会话态管理 + 兜底文案
 ├── tools/           7 个工具 + 注册表 + 序列化器
-├── llm/             Claude 调用封装 + Planner + Reranker + 评论摘要 + prompts/
+├── llm/             Claude 调用封装 + Planner + Reranker + 偏好抽取器 + 评论摘要 + prompts/
 ├── rag/
 │   ├── retrieval/   Dispatcher + 4 策略 + RRF 聚合
 │   ├── embedders/   Embedder Protocol + Gemini / OpenAI / 带缓存包装
 │   ├── sparse/      fastembed BM25 + jieba
 │   └── reranking/   LLM Reranker Protocol + 实现
-├── indexing/        ingest 流水线 + 三类 chunker + manifest + 品牌别名
+├── indexing/        ingest 流水线 + 三类 chunker + manifest + 品牌别名/产地
 ├── storage/         catalog / user / manifest repo + ORM models + vector_index
 ├── cache/           Cache Protocol + 内存 LRU / Noop
 ├── domain/          Pydantic 共享类型（QueryPlan / 卡片 / 约束）
@@ -453,15 +453,22 @@ V1 在易变点都抽了 `Protocol`，V2 升级只换实现：
 1. 校验 query 非空，否则 ToolError
 
 2. Planner（plan_query）
-   - 输入：query + user_profile + session_snapshot
+   - 输入：query + session_snapshot（**不传 profile**：画像不参与 plan，硬排除走代码合并、
+     软偏好走 reranker，职责单一）
    - Haiku 4.5，temperature=0，Tool Use 强制返回 QueryPlan
    - 输出：query_type / hard_constraints / soft_preferences / text_query /
            referenced_product_ids / confidence
    - 失败 → ToolError("无法理解 query")
 
-3. 合并画像硬过滤（_merge_profile_brand_exclude）
-   - profile.preferences.brand_exclude → 并入 plan.hard_constraints.brand_exclude
-   - 其余画像偏好不在此处理，留给 reranker 的软重排（§4.4）
+3. 统一合并所有反选来源（_apply_exclusions）→ 代码确定性，不依赖 Planner 抓全
+   - 四来源并入 plan.hard_constraints.brand_exclude（normalize 别名 + 去重）：
+     ① 当前 query brand_exclude（"不要 Nike"）
+     ② 当前 query origin_exclude（闭集"日系"→ brand_origins 展开成具体品牌）
+     ③ session.rejected_brands（本 session 累积拒绝，代码兜底，不再只靠 prompt）
+     ④ profile.preferences.brand_exclude（画像长期厌恶品牌）
+   - 返回归一化的 excluded_brands 集合，供步骤 6 的出卡 guard 复用
+   - 其余画像软偏好（肤质/品牌偏好/年龄/性别…）不在此处理，唯一 owner = reranker
+     的 _profile_fit_boost（§4.4）
 
 4. Dispatcher（deps.dispatcher.dispatch(plan)）
    - 查 retrieval cache（key = QueryPlan JSON 的 md5，TTL 300s）
@@ -484,9 +491,10 @@ V1 在易变点都抽了 `Protocol`，V2 升级只换实现：
    │     适用：id_lookup / structured / filtered_semantic 无 text_query 退化
    │     → _present_deterministic()
    │       · 按 hit 顺序 CatalogRepo.get_product_with_details() 全字段 enrich
-   │       · product_summary_from_db() 序列化 + product_card() 生成 SSE card
+   │       · product_summary_from_db() 序列化
+   │       · 出卡 guard（_drop_excluded）→ product_card() 生成 SSE card
    │       · 跳过 rerank（不打分、不过阈值，避免代词/俗称被 Haiku 误伤）
-   │     enrich 全落空（下架）→ no_match
+   │     enrich 全落空（下架）/ guard 全剔光 → no_match
    │
    └─ 6B. 语义路径（有 matched_chunks）
          → deps.reranker.rerank(plan.text_query or query, hits, profile)
@@ -498,7 +506,9 @@ V1 在易变点都抽了 `Protocol`，V2 升级只换实现：
            f. 画像 fit 微调排序（_profile_fit_boost，只排序不淘汰，§4.4）
            g. 截 top_n（RERANK_TOP_N）
          ranked 为空 → no_match
-         成功 → product_summary_from_ranked() + product_card()
+         成功 → product_summary_from_ranked()
+              → 出卡 guard（_drop_excluded，被排除品牌/属性绝不进 payload）
+              → 全剔光则 no_match；否则 product_card()
 
 7. 返回 ToolResult
    - payload：{ products, strategy, no_match }

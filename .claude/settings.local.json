@@ -101,7 +101,10 @@
       "PowerShell($env:JAVA_HOME = \"$env:LOCALAPPDATA\\\\Programs\\\\Android Studio\\\\jbr\"; if \\(-not \\(Test-Path $env:JAVA_HOME\\)\\) { $env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\" }; & \"D:\\\\ShopMind\\\\client\\\\ShopMind\\\\gradlew.bat\" -p \"D:\\\\ShopMind\\\\client\\\\ShopMind\" compileDebugKotlin -q 2>&1 | Select-Object -Last 40)",
       "PowerShell(\"exit code: $LASTEXITCODE\")",
       "PowerShell($env:JAVA_HOME = \"$env:LOCALAPPDATA\\\\Programs\\\\Android Studio\\\\jbr\"; if \\(-not \\(Test-Path $env:JAVA_HOME\\)\\) { $env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\" }; & \"D:\\\\ShopMind\\\\client\\\\ShopMind\\\\gradlew.bat\" -p \"D:\\\\ShopMind\\\\client\\\\ShopMind\" compileDebugKotlin; \"EXIT=$LASTEXITCODE\")",
-      "PowerShell(cd D:\\\\ShopMind; if \\(Test-Path .venv\\\\Scripts\\\\python.exe\\) { .venv\\\\Scripts\\\\python.exe -m py_compile server\\\\agent\\\\orchestrator.py; \"EXIT=$LASTEXITCODE\" } else { uv run python -m py_compile server\\\\agent\\\\orchestrator.py; \"EXIT=$LASTEXITCODE\" })"
+      "PowerShell(cd D:\\\\ShopMind; if \\(Test-Path .venv\\\\Scripts\\\\python.exe\\) { .venv\\\\Scripts\\\\python.exe -m py_compile server\\\\agent\\\\orchestrator.py; \"EXIT=$LASTEXITCODE\" } else { uv run python -m py_compile server\\\\agent\\\\orchestrator.py; \"EXIT=$LASTEXITCODE\" })",
+      "Bash(git -C d:/ShopMind diff --stat docs/design.md)",
+      "Bash(git -C d:/ShopMind check-ignore docs/design.md)",
+      "Bash(git *)"
     ]
   }
 }

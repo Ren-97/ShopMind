@@ -31,12 +31,13 @@ _COLUMN_FIELDS: dict[str, type] = {
 }
 
 # preferences JSON 里允许的 key(可继续扩展)
+# 注:**brand_exclude / 产地排除不在这里** —— 反选由记忆抽取层(preference_extractor)
+# 独占写入(硬过滤必须保证,不能让聊天 Agent 漏写)。本工具只管"身份 + 好恶"类软偏好。
 _PREFERENCE_KEYS: set[str] = {
     "skin_type",
     "skin_concerns",
     "fragrance_pref",
     "brand_prefer",
-    "brand_exclude",
     "usage",
     "os_pref",
     "clothing_size",
@@ -48,7 +49,7 @@ _PREFERENCE_KEYS: set[str] = {
 PreferenceField = Literal[
     "consumption_tier",
     "skin_type", "skin_concerns", "fragrance_pref",
-    "brand_prefer", "brand_exclude",
+    "brand_prefer",
     "usage", "os_pref",
     "clothing_size", "shoe_size", "style_pref",
     "dietary_restrictions",
@@ -96,13 +97,13 @@ def _coerce_value(field: str, value: Any) -> Any:
 
     # preferences.<key>:list / str 都接受
     if field in {
-        "brand_prefer", "brand_exclude", "skin_concerns",
+        "brand_prefer", "skin_concerns",
         "usage", "style_pref", "dietary_restrictions",
     }:
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise ToolError(f"{field} 必须为字符串数组")
         # 品牌字段归一化(跟 ingest / catalog_repo 用同一 alias map),保序去重
-        if field in {"brand_prefer", "brand_exclude"}:
+        if field == "brand_prefer":
             return list(dict.fromkeys(normalize_brand(v) for v in value if v))
         return value
     # 尺码类:数字 / 字符串都接受,统一存 str

@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import delete, desc, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.storage.models import (
@@ -85,6 +86,39 @@ class UserRepo:
             preferences=preferences if preferences is not None else {},
         )
         await session.merge(profile)
+
+    @staticmethod
+    async def merge_preference_list(
+        session: AsyncSession,
+        user_id: str,
+        key: str,
+        add: list[str],
+        *,
+        remove: list[str] = (),
+    ) -> list[str]:
+        """把 add 并进 `preferences[key]`(list,去重保序)、把 remove 从中剔除,返回结果列表。
+
+        **只改 preferences 列**,不动 age/gender 等其它字段(不能用 upsert_profile 的整行
+        merge,那会把未传字段冲成 None)。profile 行不存在则先建空行(同 update_preference)。
+        给后端确定性偏好抽取(orchestrator 把"我不买X"落档 / "现在能接受X"移除)复用。
+        """
+        profile = await UserRepo.get_profile(session, user_id)
+        if profile is None:
+            await UserRepo.upsert_profile(session, user_id)
+            await session.flush()
+            profile = await UserRepo.get_profile(session, user_id)
+        assert profile is not None
+        current = dict(profile.preferences or {})
+        existing = list(current.get(key) or [])
+        remove_set = set(remove)
+        merged = [v for v in dict.fromkeys([*existing, *add]) if v not in remove_set]
+        current[key] = merged
+        await session.execute(
+            sa_update(UserProfile)
+            .where(UserProfile.user_id == user_id)
+            .values(preferences=current)
+        )
+        return merged
 
     # ─── cart_items ───────────────────────────────
     @staticmethod
