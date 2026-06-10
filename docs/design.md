@@ -48,39 +48,24 @@
 
 ### 2.1 整体架构
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Android 客户端 (Kotlin + Jetpack Compose)                    │
-│  Chat / 商品详情 / 购物车 / 下单 / 个人档案                    │
-│  SSE 流式接收 · 卡片渲染 · X-User-Id 注入                      │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ HTTP (SSE 流式 + REST)
-┌───────────────────────────▼─────────────────────────────────┐
-│  FastAPI 后端 (async)                                         │
-│                                                               │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ Agent 主循环 (Sonnet) — 工具编排 / 闲聊直接回           │   │
-│  │ 7 工具: search / compare / cart / checkout /            │   │
-│  │         preference / recall / suggestions               │   │
-│  └─────────────┬──────────────────────────┬─────────────┘   │
-│                │ 调 search_products 触发    │ 流式 yield       │
-│  ┌─────────────▼────────────────────────┐ │ 事件/卡片        │
-│  │ 检索流水线（search_products 工具内部） │ │                 │
-│  │ Query Planner (Haiku) → 自适应检索     │ │                 │
-│  │ Dispatcher (4 策略) → Qdrant Hybrid    │ │                 │
-│  │ +RRF → LLM 重排 (Haiku) + 阈值兜底     │ │                 │
-│  │ → DB 全字段 enrich → 候选回 Agent       │ │                 │
-│  └────────────────────────────────────────┘ │                 │
-└──────────────┬───────────────────────────────┴───┬───────────┘
-               │                                       │
-        ┌──────▼───────┐                       ┌──────▼───────┐
-        │  Postgres    │                       │   Qdrant     │
-        │ 商品/用户态/  │                       │ 向量索引      │
-        │ 订单/历史     │                       │ dense+sparse │
-        └──────────────┘                       └──────────────┘
+```mermaid
+flowchart TD
+    A["Android 客户端 (Kotlin + Jetpack Compose)<br/>Chat · 商品详情 · 购物车 · 下单 · 个人档案<br/>SSE 流式接收 · 卡片渲染 · X-User-Id 注入"]
+    A -->|"HTTP（SSE 流式 + REST）"| B
 
-外部服务：Claude（Sonnet 主对话 / Haiku 规划·重排）· Gemini Embedding · 火山引擎 Doubao（仅离线评测 Judge，非运行时依赖）
+    subgraph B["FastAPI 后端 (async)"]
+        direction TB
+        AG["Agent 主循环 (Sonnet)<br/>工具编排 / 闲聊直接回<br/>7 工具: search · compare · cart · checkout · preference · recall · suggestions"]
+        RT["检索流水线 (search_products 工具内部)<br/>Query Planner (Haiku) → 自适应检索 Dispatcher (4 策略)<br/>→ Qdrant Hybrid + RRF → LLM 重排 (Haiku) + 阈值兜底<br/>→ DB 全字段 enrich → 候选回 Agent"]
+        AG -->|"调 search_products"| RT
+    end
+
+    B -->|"流式 yield：思考 / 文本 / 卡片 / 追问"| A
+    B --> PG[("Postgres<br/>商品 / 用户态 / 订单 / 历史")]
+    B --> QD[("Qdrant<br/>向量索引 · dense+sparse")]
 ```
+
+> 外部服务：Claude（Sonnet 主对话 / Haiku 规划·重排）· Gemini Embedding · 火山引擎 Doubao（仅离线评测 Judge，非运行时依赖）。
 
 ### 2.2 一次对话的完整链路
 

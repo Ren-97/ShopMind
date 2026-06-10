@@ -104,7 +104,10 @@
       "PowerShell(cd D:\\\\ShopMind; if \\(Test-Path .venv\\\\Scripts\\\\python.exe\\) { .venv\\\\Scripts\\\\python.exe -m py_compile server\\\\agent\\\\orchestrator.py; \"EXIT=$LASTEXITCODE\" } else { uv run python -m py_compile server\\\\agent\\\\orchestrator.py; \"EXIT=$LASTEXITCODE\" })",
       "Bash(git -C d:/ShopMind diff --stat docs/design.md)",
       "Bash(git -C d:/ShopMind check-ignore docs/design.md)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(py /tmp/diagram.py)",
+      "PowerShell($p = \\(Get-Command python -ErrorAction SilentlyContinue\\); if\\($p\\){$p.Source}; $p2=\\(Get-Command py -ErrorAction SilentlyContinue\\); if\\($p2\\){$p2.Source}; \\(Get-Command uv -ErrorAction SilentlyContinue\\).Source)",
+      "PowerShell($mmdc = \\(Get-Command mmdc -ErrorAction SilentlyContinue\\); if\\($mmdc\\){\"mmdc: $\\($mmdc.Source\\)\"}else{\"mmdc: no\"}; $npx=\\(Get-Command npx -ErrorAction SilentlyContinue\\); if\\($npx\\){\"npx: $\\($npx.Source\\)\"}else{\"npx: no\"}; $node=\\(Get-Command node -ErrorAction SilentlyContinue\\); if\\($node\\){\"node: $\\(node -v\\)\"}else{\"node: no\"})"
     ]
   }
 }
